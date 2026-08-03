@@ -8,6 +8,7 @@ Regra de divisão:
   pelo exit code do pytest (nó determinístico), e o revisor LLM cobre apenas
   o que execução não pega.
 """
+import os
 import sqlite3
 import subprocess
 import sys
@@ -28,6 +29,7 @@ from ..crews.planejamento import crew_planejamento
 from ..crews.qualidade import crew_revisao, crew_testes
 from ..deploy import executar_deploy
 from ..llm import zen_llm
+from ..opencode import executar_opencode
 from .state import EstadoProjeto
 
 MAX_TENTATIVAS = 3
@@ -39,7 +41,9 @@ LIMITE_SAIDA_TESTES = 8_000   # chars da saída do pytest guardados no estado
 
 # ---------- helpers de workspace ----------
 
-_IGNORAR_NO_WORKSPACE = {"__pycache__", ".pytest_cache"}
+# Diretórios de trabalho (caches de ferramentas e instruções da squad ao
+# executor) que não fazem parte da entrega.
+_IGNORAR_NO_WORKSPACE = {"__pycache__", ".pytest_cache", ".ruff_cache", ".squad", ".git"}
 
 
 def _arquivos_do_workspace(workspace: str) -> list[str]:
@@ -100,6 +104,7 @@ def no_executar_testes(state: EstadoProjeto) -> EstadoProjeto:
             cwd=state["workspace"],
             capture_output=True,
             text=True,
+            stdin=subprocess.DEVNULL,  # teste que pede input falha, não trava
             timeout=TIMEOUT_PYTEST,
         )
         saida = (r.stdout + "\n" + r.stderr).strip()[-LIMITE_SAIDA_TESTES:]
@@ -175,14 +180,27 @@ def no_validacao_spec(state: EstadoProjeto) -> EstadoProjeto:
 
 
 def no_desenvolvimento(state: EstadoProjeto) -> EstadoProjeto:
-    crew_desenvolvimento(state["workspace"]).kickoff(
-        inputs={
-            "spec": state["spec"],
-            "feedback_qa": state.get("feedback_qa", "Nenhum — primeira rodada."),
-        }
-    )
+    """Escreve a implementação no workspace. O executor é intercambiável
+    (DEV_EXECUTOR): o OpenCode CLI como mão de obra especialista, ou as crews
+    CrewAI como caminho sem dependência externa. A governança do grafo é a
+    mesma nos dois casos."""
+    executor = os.getenv("DEV_EXECUTOR", "opencode").strip().lower()
+    feedback = state.get("feedback_qa", "")
+    if executor == "opencode":
+        executar_opencode(state["workspace"], state["spec"], feedback)
+    elif executor == "crews":
+        crew_desenvolvimento(state["workspace"]).kickoff(
+            inputs={
+                "spec": state["spec"],
+                "feedback_qa": feedback or "Nenhum — primeira rodada.",
+            }
+        )
+    else:
+        raise ValueError(
+            f"DEV_EXECUTOR inválido: '{executor}'. Use 'opencode' ou 'crews'."
+        )
     # O que vale é o que está no disco: o manifesto do estado vem de uma
-    # varredura determinística do workspace, não do texto da crew.
+    # varredura determinística do workspace, não do texto do executor.
     arquivos = _arquivos_do_workspace(state["workspace"])
     return {
         "arquivos": arquivos,

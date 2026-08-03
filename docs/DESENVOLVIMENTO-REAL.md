@@ -16,7 +16,8 @@ ao mundo real supera cinco agentes conversando sobre ele.
 
 ## As cinco fases
 
-> **Status (ago/2026):** Fases 1–4 **implementadas**. Decisão de escopo: a
+> **Status (ago/2026):** Fases 1–5 **implementadas** — resta a migração do
+> sandbox de testes para Docker. Decisão de escopo: a
 > execução dos testes roda em **subprocess no host com teto de tempo** (e
 > ferramentas de arquivo confinadas ao workspace como jaula mínima); o
 > sandbox Docker descrito na seção "CrewAI vs Docker" fica como **migração
@@ -61,11 +62,21 @@ build de container), atrás do mesmo gate humano.
 git (exit != 0 ou timeout) levanta erro explícito — o checkpoint preserva o
 progresso e `--thread` retoma reexecutando só o deploy.
 
-### Fase 5 — OpenCode como músculo (futuro)
+### Fase 5 — OpenCode como músculo
 O nó de desenvolvimento invoca o OpenCode CLI em modo headless
 (`opencode run`) apontado para o workspace. A assinatura vira a mão de obra;
 a squad vira a **gerência**: guard, QA real e gate governando um executor que
 já é excelente em escrever código.
+
+*Desenho implementado:* executor **intercambiável** via `DEV_EXECUTOR`
+(`opencode`, padrão, ou `crews`) — a governança do grafo é idêntica nos dois
+casos, porque o nó lê o disco, não o texto do executor. As instruções vão
+para `.squad/tarefa.md` dentro do workspace e o prompt do CLI é uma linha
+única apontando para o arquivo: no Windows o binário é o shim `opencode.CMD`
+do npm, e argumentos multilinha são truncados na primeira quebra de linha por
+cmd.exe (specs longas também esbarrariam no limite de tamanho de argumento).
+O executor é proibido de escrever em `tests/` — quem escreve os testes é o QA
+da squad, mantendo a separação entre quem implementa e quem valida.
 
 ## O que NÃO muda
 

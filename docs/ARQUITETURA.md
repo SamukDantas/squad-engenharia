@@ -18,7 +18,7 @@ sequenceDiagram
     participant CK as Checkpointer SQLite
     participant P as Crew Planejamento (analista → arquiteto)
     participant V as Guard de Aderência (chamada única LLM)
-    participant D as Crew Desenvolvimento (backend → integração → tech lead)
+    participant D as Executor de Desenvolvimento (OpenCode CLI ou crews CrewAI)
     participant T as Crew Testes (QA escreve pytest)
     participant WS as Workspace (workspace/thread_id)
     participant PT as pytest (subprocess, timeout 120s)
@@ -43,8 +43,8 @@ sequenceDiagram
     end
 
     loop máx. 3 tentativas de correção
-        G->>D: kickoff(spec, feedback_qa)
-        D->>WS: escreve arquivos .py REAIS (ferramentas confinadas ao workspace)
+        G->>D: executa(spec, feedback_qa) conforme DEV_EXECUTOR
+        D->>WS: escreve arquivos .py REAIS (não escreve em tests/)
         G->>WS: varre o disco: manifesto + dump do código
         G->>CK: salva checkpoint
         G->>T: kickoff(spec, arquivos)
@@ -79,15 +79,20 @@ sequenceDiagram
 1. **Triagem toca o disco**: `workspace/<thread_id>/` é criado antes de
    qualquer LLM rodar; a entrega vive como arquivos, não como string no
    estado do grafo.
-2. **Qualidade em três participantes**: a crew de testes escreve pytest real,
+2. **Executor de desenvolvimento intercambiável**: `DEV_EXECUTOR` escolhe
+   entre o OpenCode CLI (padrão) e as crews CrewAI. A governança é a mesma
+   nos dois casos — o grafo lê o disco, não o texto do executor.
+3. **Qualidade em três participantes**: a crew de testes escreve pytest real,
    o pytest executa em nó determinístico (sem LLM) e o revisor LLM cobre o
    que execução não pega — legibilidade, segurança, aderência à spec.
-3. **Dois níveis de decisão no laço**: primeiro o exit code (vermelho volta
+4. **Dois níveis de decisão no laço**: primeiro o exit code (vermelho volta
    ao desenvolvimento com o stack trace real, sem gastar token de revisão);
    só com verde o revisor roda. Aprovação automática = testes verdes **E**
    revisão aprovada.
-4. **O grafo lê o disco**: manifesto de arquivos e dump de código vêm de
+5. **Separação entre implementar e validar**: quem escreve o código não
+   escreve os testes — o executor é proibido de tocar em `tests/`.
+6. **O grafo lê o disco**: manifesto de arquivos e dump de código vêm de
    varredura determinística do workspace, injetados nas tarefas que decidem
    roteamento (RESILIENCIA.md, item 10).
-5. **Circuit breakers**: 2 replanejamentos (depois erro explícito) e 3
+7. **Circuit breakers**: 2 replanejamentos (depois erro explícito) e 3
    rodadas de correção (depois o gate humano decide).

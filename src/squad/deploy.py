@@ -15,7 +15,9 @@ from pathlib import Path
 
 TIMEOUT_GIT = 60  # segundos por comando
 
-_GITIGNORE_ENTREGA = "__pycache__/\n.pytest_cache/\n*.pyc\n"
+_GITIGNORE_ENTREGA = (
+    "__pycache__/\n.pytest_cache/\n.ruff_cache/\n.squad/\n*.pyc\n"
+)
 
 
 def _git(workspace: str, *args: str) -> str:
@@ -26,6 +28,7 @@ def _git(workspace: str, *args: str) -> str:
             cwd=workspace,
             capture_output=True,
             text=True,
+            stdin=subprocess.DEVNULL,  # git nunca deve pedir input interativo
             timeout=TIMEOUT_GIT,
         )
     except subprocess.TimeoutExpired:
