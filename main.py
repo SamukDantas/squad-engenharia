@@ -11,7 +11,13 @@ retome com --thread e o grafo continua do último nó concluído.
 import argparse
 import uuid
 
+import truststore
 from dotenv import load_dotenv
+
+# Valida TLS pelo repositório de certificados do SO, não pelo bundle do
+# certifi — em redes com inspeção TLS (proxy/antivírus corporativo), o bundle
+# não conhece o emissor e toda chamada HTTPS falha com CERTIFICATE_VERIFY_FAILED.
+truststore.inject_into_ssl()
 
 load_dotenv(override=True)
 

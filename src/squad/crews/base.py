@@ -18,13 +18,14 @@ AGENTS_CFG = _load("agents.yaml")
 TASKS_CFG = _load("tasks.yaml")
 
 
-def build_agent(key: str, **overrides) -> Agent:
+def build_agent(key: str, tools: list | None = None, **overrides) -> Agent:
     cfg = {**AGENTS_CFG[key], **overrides}
     return Agent(
         role=cfg["role"],
         goal=cfg["goal"],
         backstory=cfg["backstory"],
         allow_delegation=cfg.get("allow_delegation", False),
+        tools=tools or [],
         llm=zen_llm(),
         verbose=True,
     )
