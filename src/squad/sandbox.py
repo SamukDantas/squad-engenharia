@@ -51,15 +51,39 @@ def _preparar(workspace: str) -> Path:
     return raiz
 
 
-def _cobertura(workspace: str) -> float:
+def _cobertura(workspace: str) -> dict:
+    """Cobertura total e a do **pior módulo**.
+
+    O agregado sozinho engana: módulos bem testados puxam a média e escondem
+    justamente o arquivo central do pedido. Quem decide precisa dos dois
+    números.
+    """
+    vazio = {"cobertura": 0.0, "cobertura_pior": 0.0, "cobertura_pior_arquivo": ""}
     arquivo = Path(workspace) / DIR_SAIDA / "coverage.json"
     if not arquivo.is_file():
-        return 0.0
+        return vazio
     try:
         dados = json.loads(arquivo.read_text(encoding="utf-8"))
-        return round(float(dados["totals"]["percent_covered"]), 1)
+        total = round(float(dados["totals"]["percent_covered"]), 1)
     except (ValueError, KeyError):
-        return 0.0
+        return vazio
+
+    pior, pior_arquivo = None, ""
+    for nome, info in (dados.get("files") or {}).items():
+        resumo = info.get("summary", {})
+        # Arquivo sem instruções (ex.: __init__.py vazio) reporta 100% e não
+        # diz nada sobre a qualidade da suíte.
+        if not resumo.get("num_statements"):
+            continue
+        pct = round(float(resumo.get("percent_covered", 0.0)), 1)
+        if pior is None or pct < pior:
+            pior, pior_arquivo = pct, nome.replace("\\", "/")
+
+    return {
+        "cobertura": total,
+        "cobertura_pior": total if pior is None else pior,
+        "cobertura_pior_arquivo": pior_arquivo,
+    }
 
 
 def _checar_docker() -> None:
@@ -182,12 +206,14 @@ def executar_testes(workspace: str, thread_id: str) -> dict:
 
     testes_ok = codigo == 0
     cobertura = _cobertura(workspace)
+    detalhe_pior = (
+        f" (pior: {cobertura['cobertura_pior_arquivo']} "
+        f"{cobertura['cobertura_pior']}%)"
+        if cobertura["cobertura_pior_arquivo"]
+        else ""
+    )
     print(
         f">>> pytest exit code {codigo} — {'verde' if testes_ok else 'vermelho'}"
-        f" | cobertura {cobertura}%"
+        f" | cobertura {cobertura['cobertura']}%{detalhe_pior}"
     )
-    return {
-        "testes_ok": testes_ok,
-        "cobertura": cobertura,
-        "saida_testes": saida[-LIMITE_SAIDA:],
-    }
+    return {**cobertura, "testes_ok": testes_ok, "saida_testes": saida[-LIMITE_SAIDA:]}

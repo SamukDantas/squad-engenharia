@@ -10,6 +10,7 @@ Regra de divisão:
 """
 import os
 import sqlite3
+from fnmatch import fnmatch
 from pathlib import Path
 
 from langchain_core.runnables import RunnableConfig
@@ -36,13 +37,24 @@ MAX_TENTATIVAS = 3
 MAX_REPLANEJAMENTOS = 2
 MAX_TESTES = 2                # reescritas da suíte por rodada de desenvolvimento
 LIMITE_DUMP_CODIGO = 15_000   # chars de código injetados na tarefa do revisor
+LIMITE_AMOSTRA_TESTES = 20_000  # chars da suíte mostrados ao guard de critérios
+
+
+def _piso(variavel: str, padrao: float) -> float:
+    try:
+        return float(os.getenv(variavel, str(padrao)))
+    except ValueError:
+        return padrao
 
 
 def _cobertura_minima() -> float:
-    try:
-        return float(os.getenv("COBERTURA_MINIMA", "70"))
-    except ValueError:
-        return 70.0
+    return _piso("COBERTURA_MINIMA", 70.0)
+
+
+def _cobertura_minima_modulo() -> float:
+    """Piso por módulo: o agregado sozinho deixa passar suíte que testa muito
+    o que é fácil e ignora o arquivo central do pedido."""
+    return _piso("COBERTURA_MINIMA_MODULO", 60.0)
 
 
 def _tid(config: RunnableConfig) -> str:
@@ -66,15 +78,30 @@ def _veredito_sim(resposta: object) -> bool:
 # executor) que não fazem parte da entrega.
 _IGNORAR_NO_WORKSPACE = {"__pycache__", ".pytest_cache", ".ruff_cache", ".squad", ".git"}
 
+# Rastro que o executor deixa ao rodar comandos (saída de pytest, log de
+# instalação): não é entrega, polui o dump enviado ao revisor e iria parar no
+# deploy. Heurística por nome — conservadora de propósito, para não descartar
+# arquivo legítimo.
+_ARQUIVOS_TRANSITORIOS = ("*.log", "*_output.txt", "*_result.txt", "*_results.txt")
+
+
+def _e_transitorio(rel: str) -> bool:
+    nome = rel.rsplit("/", 1)[-1]
+    return any(fnmatch(nome, padrao) for padrao in _ARQUIVOS_TRANSITORIOS)
+
 
 def _arquivos_do_workspace(workspace: str) -> list[str]:
     raiz = Path(workspace)
     return sorted(
-        str(p.relative_to(raiz)).replace("\\", "/")
-        for p in raiz.rglob("*")
-        if p.is_file()
-        and not _IGNORAR_NO_WORKSPACE.intersection(p.parts)
-        and p.suffix != ".pyc"
+        rel
+        for rel in (
+            str(p.relative_to(raiz)).replace("\\", "/")
+            for p in raiz.rglob("*")
+            if p.is_file()
+            and not _IGNORAR_NO_WORKSPACE.intersection(p.parts)
+            and p.suffix != ".pyc"
+        )
+        if not _e_transitorio(rel)
     )
 
 
@@ -95,9 +122,30 @@ def _dump_codigo(workspace: str, arquivos: list[str]) -> str:
     return "\n".join(partes)
 
 
-def _dump_testes(workspace: str, arquivos: list[str]) -> str:
-    """Só os arquivos de teste, para o guard de critérios avaliar."""
-    return _dump_codigo(workspace, [a for a in arquivos if a.startswith("tests/")])
+def _amostra_testes(workspace: str, arquivos: list[str]) -> str:
+    """Amostra da suíte para o guard de critérios, com **todos** os arquivos
+    representados.
+
+    Truncar a suíte no total (os primeiros N chars) faz o guard julgar por
+    amostra sem saber: arquivos no fim da ordem alfabética ficam invisíveis, e
+    ele reprova por não ver testes que existem. Aqui o orçamento é dividido
+    entre os arquivos e o manifesto lista a suíte inteira.
+    """
+    testes = [a for a in arquivos if a.startswith("tests/")]
+    if not testes:
+        return ""
+
+    manifesto = "\n".join(f"- {a}" for a in testes)
+    cabecalho = f"Arquivos de teste na suíte ({len(testes)}):\n{manifesto}\n\n"
+    por_arquivo = max((LIMITE_AMOSTRA_TESTES - len(cabecalho)) // len(testes), 500)
+
+    partes = []
+    for rel in testes:
+        conteudo = (Path(workspace) / rel).read_text(encoding="utf-8", errors="replace")
+        if len(conteudo) > por_arquivo:
+            conteudo = f"{conteudo[:por_arquivo]}\n[... {rel} truncado aqui ...]"
+        partes.append(f"### {rel}\n{conteudo}")
+    return cabecalho + "\n".join(partes)
 
 
 # ---------- nós determinísticos ----------
@@ -126,27 +174,45 @@ def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     thread_id = _tid(config)
     with medir(thread_id, "executar_testes", runner=os.getenv("TEST_RUNNER", "docker")) as m:
         resultado = executar_testes(state["workspace"], thread_id)
-        m.update(testes_ok=resultado["testes_ok"], cobertura=resultado["cobertura"])
+        m.update(
+            testes_ok=resultado["testes_ok"],
+            cobertura=resultado["cobertura"],
+            cobertura_pior=resultado["cobertura_pior"],
+            cobertura_pior_arquivo=resultado["cobertura_pior_arquivo"],
+        )
 
     saida = resultado["saida_testes"]
-    cobertura_ok = resultado["cobertura"] >= _cobertura_minima()
-    if resultado["testes_ok"] and not cobertura_ok:
-        print(
-            f">>> Cobertura {resultado['cobertura']}% abaixo do mínimo "
-            f"({_cobertura_minima()}%) — testes não exercitam a entrega."
-        )
+    total, pior = resultado["cobertura"], resultado["cobertura_pior"]
+    pior_arquivo = resultado["cobertura_pior_arquivo"]
+    # Dois pisos: o agregado pega suíte fraca no geral; o por módulo pega a
+    # suíte que testa muito o que é fácil e ignora o arquivo central.
+    agregado_ok = total >= _cobertura_minima()
+    modulo_ok = pior >= _cobertura_minima_modulo()
+    cobertura_ok = agregado_ok and modulo_ok
 
     if not resultado["testes_ok"]:
         feedback = (
             "Os testes automatizados FALHARAM. Corrija o código (ou os "
             f"imports/estrutura) com base na saída real do pytest:\n{saida}"
         )
-    elif not cobertura_ok:
+    elif not agregado_ok:
         # Problema do teste, não do código: quem reescreve é o QA.
         feedback = (
-            f"Os testes passam, mas cobrem apenas {resultado['cobertura']}% da "
-            f"entrega (mínimo {_cobertura_minima()}%). Escreva testes que "
-            "exercitem os módulos e os caminhos ainda não cobertos."
+            f"Os testes passam, mas cobrem apenas {total}% da entrega (mínimo "
+            f"{_cobertura_minima()}%). Escreva testes que exercitem os módulos "
+            "e os caminhos ainda não cobertos."
+        )
+    elif not modulo_ok:
+        print(
+            f">>> Cobertura agregada {total}% ok, mas {pior_arquivo} está em "
+            f"{pior}% (mínimo por módulo: {_cobertura_minima_modulo()}%)."
+        )
+        feedback = (
+            f"A cobertura total ({total}%) esconde um módulo sem teste: "
+            f"{pior_arquivo} está em apenas {pior}% (mínimo por módulo "
+            f"{_cobertura_minima_modulo()}%). Escreva testes que exercitem "
+            f"{pior_arquivo} de ponta a ponta, pelo comportamento observável "
+            "que a spec exige — não apenas as funções auxiliares."
         )
     else:
         feedback = ""
@@ -265,7 +331,7 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
     suíte ignora os critérios de aceite. Espelha o guard de aderência —
     uma chamada barata antes de executar, porque reprovar aqui custa
     centavos e uma rodada inteira do laço custa a execução."""
-    testes = _dump_testes(state["workspace"], state.get("arquivos", []))
+    testes = _amostra_testes(state["workspace"], state.get("arquivos", []))
     if not testes.strip():
         print(">>> Guard de critérios: nenhum arquivo de teste encontrado.")
         return {"testes_aderentes": False}
@@ -277,7 +343,7 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
             "critérios de aceite da especificação — cobrindo o comportamento "
             "exigido, e não apenas asserções triviais ou detalhes irrelevantes?"
             f"\n\nEspecificação:\n{state['spec'][:6000]}"
-            f"\n\nTestes:\n{testes[:8000]}"
+            f"\n\nTestes:\n{testes}"
         )
         aderentes = _veredito_sim(veredito)
         m.update(testes_aderentes=aderentes)

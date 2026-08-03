@@ -13,8 +13,10 @@ class EstadoProjeto(TypedDict, total=False):
     testes_aderentes: bool   # guard de critérios: a suíte testa o que a spec exige?
     testes_tentativas: int   # contador do laço de reescrita de testes
     testes_ok: bool      # veredito de execução: exit code do pytest == 0
-    cobertura: float     # % de cobertura da entrega pelos testes executados
-    cobertura_ok: bool   # cobertura >= COBERTURA_MINIMA
+    cobertura: float     # % de cobertura agregada da entrega
+    cobertura_pior: float        # % do módulo menos coberto
+    cobertura_pior_arquivo: str  # qual é esse módulo
+    cobertura_ok: bool   # passou nos dois pisos (agregado e por módulo)
     saida_testes: str    # saída real (stdout+stderr) do pytest
     relatorio_qa: str    # saída do revisor de código
     feedback_qa: str     # correções pedidas quando reprovado (stack trace ou revisão)

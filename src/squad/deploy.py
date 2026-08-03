@@ -17,6 +17,8 @@ TIMEOUT_GIT = 60  # segundos por comando
 
 _GITIGNORE_ENTREGA = (
     "__pycache__/\n.pytest_cache/\n.ruff_cache/\n.squad/\n*.pyc\n"
+    # Rastro de comandos rodados pelo executor: não é entrega.
+    "*.log\n*_output.txt\n*_result.txt\n*_results.txt\n"
 )
 
 
