@@ -5,7 +5,8 @@ squad, com causa raiz, solução aplicada e o princípio de arquitetura por trá
 Todos ocorreram em execuções reais (jul–ago/2026) usando OpenCode Zen como
 provedor. Os itens 1–10 vêm da squad em modo simulação; os itens 11–14
 apareceram na evolução para desenvolvimento real (Fases 1–5), quando os
-agentes ganharam disco, ferramentas e processos externos.
+agentes ganharam disco, ferramentas e processos externos; os itens 15–16
+surgiram ao mover a execução dos testes para uma jaula Docker (Fase 6).
 
 ---
 
@@ -290,23 +291,81 @@ mais caro o retrabalho — e o gate humano é o último nó.
 
 ---
 
+## 15. Exit code 0 que significa falha: o guard que não guardava
+
+**Sintoma:** com o Docker Desktop parado, `docker info` **sai com código 0** e
+imprime `Error response from daemon: Docker Desktop is unable to start` no
+lugar da versão do servidor. O guard do sandbox, que checava apenas o exit
+code, dava o daemon como saudável.
+
+**Causa raiz:** convenção de exit code não é contrato. O cliente Docker
+considera que *ele* funcionou — conseguiu falar com o que havia — e reporta o
+problema no conteúdo da resposta, não no status. O mesmo enganou o laço que
+esperava o daemon subir: ele terminou instantaneamente, com falso positivo.
+
+**Solução:** o guard passou a exigir uma **resposta válida**, não apenas
+status de sucesso — versão não vazia e sem sinal de erro no texto. Sem isso, a
+falha só apareceria mais tarde, disfarçada de erro do pytest, no meio do laço
+de correções.
+
+**Princípio:** ao integrar ferramenta externa, valide a **resposta**, não só o
+status. Onde há sinal ambíguo, prefira falhar cedo e alto: um guard que
+aprova o que deveria barrar é pior que guard nenhum, porque desloca a falha
+para longe da causa. Vale para exit codes como o item 7 vale para vereditos de
+LLM — normalize e desconfie.
+
+---
+
+## 16. `pytest` vs `python -m pytest`: o mesmo teste, dois `sys.path`
+
+**Sintoma:** a suíte que rodava verde no host quebrou inteira ao migrar para o
+sandbox Docker — `ModuleNotFoundError: No module named 'app'` na **coleta**,
+5 erros antes de qualquer teste executar. Mesmo código, mesma versão de
+Python, mesmas dependências.
+
+**Causa raiz:** dentro do container o comando era `pytest ...`; no host,
+`python -m pytest ...`. Só a forma com `-m` insere o diretório atual no
+`sys.path` — sem ela, `from app import app` não resolve.
+
+**Solução:** padronizar `python -m pytest` nos dois runners. A diferença de
+invocação era o único delta real entre os ambientes.
+
+**Princípio:** ambientes de execução equivalentes precisam ser invocados de
+forma idêntica, senão a paridade é ilusão — e o sintoma aparece longe da
+causa (um erro de import parece problema do código gerado, não da forma de
+chamar o pytest). Ao migrar uma etapa para outro ambiente, o primeiro
+suspeito de qualquer divergência é a **linha de comando**, não o código.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
-Camada 1 — Guard de aderência   (barato, automático)  → pega tema errado
-Camada 2 — pytest real          (barato, determinístico) → pega defeito que executa errado
-Camada 3 — Revisor LLM          (caro, automático)    → pega o que passa nos testes
-Camada 4 — Gate humano          (manual)              → segura ação irreversível
+Camada 1 — Guard de aderência   (barato, automático)     → pega tema errado
+Camada 2 — Guard de critérios   (barato, automático)     → pega suíte que não testa a spec
+Camada 3 — pytest na jaula      (barato, determinístico) → pega defeito que executa errado
+Camada 4 — Piso de cobertura    (barato, determinístico) → pega teste que não exercita a entrega
+Camada 5 — Revisor LLM          (caro, automático)       → pega o que passa nos testes
+Camada 6 — Gate humano          (manual)                 → segura ação irreversível
 Transversal — Checkpoints SQLite + circuit breakers + parsers tolerantes
-            + confinamento de ferramentas ao workspace
+            + confinamento de ferramentas ao workspace + sandbox sem rede
+            + métricas por execução
 ```
 
 Cada camada pega uma classe de erro que as outras não pegam; nenhuma sozinha
 seria suficiente. Todos os itens deste documento foram descobertos e validados
 em execuções reais — não são hipóteses de design.
 
-Com as Fases 1–5, a camada 2 deixou de ser opinião de LLM e virou **execução**:
-o laço de correções é roteado pelo exit code do pytest, e o revisor só é
-acionado com testes verdes. O item 7 (parsers tolerantes) continua valendo
-onde LLM ainda decide — guard de aderência e veredito da revisão —, mas o
-sinal mais caro do grafo passou a ser objetivo.
+Duas evoluções mudaram a natureza da defesa. Com as Fases 1–5, o sinal mais
+caro do grafo deixou de ser opinião de LLM e virou **execução**: o laço de
+correções é roteado pelo exit code do pytest, e o revisor só é acionado com
+testes verdes. Com as Fases 6–7, a execução ganhou **jaula** (container sem
+rede, entrega read-only) e a própria suíte passou a ser vigiada — porque
+testes verdes escritos por quem também poderia escrevê-los fracos não provam
+correção. O item 7 (parsers tolerantes) segue valendo onde LLM ainda decide:
+os dois guards e o veredito da revisão.
+
+Uma camada só serve para o que ela consegue ver. Os itens 15 e 16 mostram o
+custo de confiar em sinal ambíguo — exit code que mente, invocação que muda o
+`sys.path`: guarda que aprova o que deveria barrar desloca a falha para longe
+da causa, e é justamente onde o depurador não vai procurar.
