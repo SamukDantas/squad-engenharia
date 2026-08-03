@@ -1,7 +1,17 @@
 crewai>=0.95
-crewai-tools>=0.30
 langgraph>=0.3
 langchain-core>=0.3
 python-dotenv>=1.0
+truststore>=0.9
 pyyaml>=6.0
 langgraph-checkpoint-sqlite>=2.0
+
+# Ambiente pré-provisionado para o código gerado (Fases 1-3 sem Docker):
+# os devs só podem usar stdlib + estas libs, e o pytest do nó de QA roda
+# neste mesmo ambiente. Import fora da lista quebra os testes (reprova com
+# stack trace). Estenda a lista aqui e nas tarefas (tasks.yaml) em conjunto.
+pytest>=8.0
+fastapi>=0.110
+httpx>=0.27
+flask>=3.0
+requests>=2.31

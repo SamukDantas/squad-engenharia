@@ -16,6 +16,14 @@ ao mundo real supera cinco agentes conversando sobre ele.
 
 ## As cinco fases
 
+> **Status (ago/2026):** Fases 1–3 **implementadas**. Decisão de escopo: a
+> execução dos testes roda em **subprocess no host com teto de tempo** (e
+> ferramentas de arquivo confinadas ao workspace como jaula mínima); o
+> sandbox Docker descrito na seção "CrewAI vs Docker" fica como **migração
+> futura**, junto com as Fases 4–5. Entregas são em **Python** (o pytest é o
+> juiz) e as dependências do código gerado vêm de um **ambiente
+> pré-provisionado** no requirements.txt — sem pip install em runtime.
+
 ### Fase 1 — Workspace real por execução
 Uma pasta `workspace/<thread_id>/` onde o código vive como **arquivos**, não
 como string gigante no estado do grafo. O estado passa a carregar caminhos e
@@ -29,9 +37,10 @@ reais no workspace, em vez de descrever código em markdown.
 
 ### Fase 3 — QA que executa (a mudança mais importante)
 O nó de qualidade vira dois passos:
-1. **Determinístico**: roda `pytest` de verdade em **sandbox Docker**
-   (ver seção "CrewAI vs Docker" abaixo) — veredito objetivo
-   (exit code + relatório de falhas);
+1. **Determinístico**: roda `pytest` de verdade — veredito objetivo
+   (exit code + relatório de falhas). Hoje em subprocess no host com
+   timeout; o **sandbox Docker** (ver seção "CrewAI vs Docker" abaixo) é a
+   migração futura desta etapa;
 2. **Revisor LLM**: continua existindo para o que execução não pega —
    legibilidade, segurança, aderência à spec.
 

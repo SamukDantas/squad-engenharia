@@ -2,10 +2,18 @@
 
 Regra de divisão:
 - decisões caras (avançar, repetir, parar, chamar humano) ficam AQUI, no grafo;
-- trabalho especialista (escrever, testar, revisar) fica nas crews CrewAI.
+- trabalho especialista (escrever código, escrever testes, revisar) fica nas
+  crews CrewAI;
+- vereditos vêm de execução, não de opinião: o laço de correções é roteado
+  pelo exit code do pytest (nó determinístico), e o revisor LLM cobre apenas
+  o que execução não pega.
 """
 import sqlite3
+import subprocess
+import sys
+from pathlib import Path
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
@@ -17,29 +25,109 @@ except ImportError:  # pacote opcional ausente: cai no checkpointer em memória
 
 from ..crews.desenvolvimento import crew_desenvolvimento
 from ..crews.planejamento import crew_planejamento
-from ..crews.qualidade import crew_qualidade
+from ..crews.qualidade import crew_revisao, crew_testes
 from ..llm import zen_llm
 from .state import EstadoProjeto
 
 MAX_TENTATIVAS = 3
 MAX_REPLANEJAMENTOS = 2
+TIMEOUT_PYTEST = 120          # segundos; estourou = reprova (loop infinito etc.)
+LIMITE_DUMP_CODIGO = 15_000   # chars de código injetados na tarefa do revisor
+LIMITE_SAIDA_TESTES = 8_000   # chars da saída do pytest guardados no estado
+
+
+# ---------- helpers de workspace ----------
+
+_IGNORAR_NO_WORKSPACE = {"__pycache__", ".pytest_cache"}
+
+
+def _arquivos_do_workspace(workspace: str) -> list[str]:
+    raiz = Path(workspace)
+    return sorted(
+        str(p.relative_to(raiz)).replace("\\", "/")
+        for p in raiz.rglob("*")
+        if p.is_file()
+        and not _IGNORAR_NO_WORKSPACE.intersection(p.parts)
+        and p.suffix != ".pyc"
+    )
+
+
+def _dump_codigo(workspace: str, arquivos: list[str]) -> str:
+    """Concatena o conteúdo real dos arquivos (limitado) para injetar na
+    tarefa do revisor — artefato que decide roteamento não pode depender só
+    de elos de contexto entre tarefas (RESILIENCIA.md, item 10)."""
+    partes: list[str] = []
+    total = 0
+    for rel in arquivos:
+        conteudo = (Path(workspace) / rel).read_text(encoding="utf-8", errors="replace")
+        bloco = f"### {rel}\n{conteudo}\n"
+        partes.append(bloco)
+        total += len(bloco)
+        if total > LIMITE_DUMP_CODIGO:
+            partes.append("### [dump truncado no limite]")
+            break
+    return "\n".join(partes)
 
 
 # ---------- nós determinísticos ----------
 
-def no_triagem(state: EstadoProjeto) -> EstadoProjeto:
-    """Valida a entrada e inicializa contadores. Nenhum LLM envolvido."""
+def no_triagem(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
+    """Valida a entrada, cria o workspace da execução e zera contadores."""
     pedido = (state.get("pedido") or "").strip()
     if not pedido:
         raise ValueError("Pedido vazio — nada a fazer.")
-    return {"pedido": pedido, "tentativas": 0}
+    thread_id = config["configurable"]["thread_id"]
+    workspace = Path("workspace") / str(thread_id)
+    workspace.mkdir(parents=True, exist_ok=True)
+    print(f">>> Workspace desta execução: {workspace.resolve()}")
+    return {"pedido": pedido, "tentativas": 0, "workspace": str(workspace.resolve())}
+
+
+def no_executar_testes(state: EstadoProjeto) -> EstadoProjeto:
+    """Veredito por execução: roda o pytest de verdade no workspace.
+
+    Sem LLM. Exit code 0 = verde; qualquer outro (inclusive 5, "nenhum teste
+    coletado") = vermelho. Timeout = vermelho. O sandbox Docker desta etapa é
+    migração futura (docs/DESENVOLVIMENTO-REAL.md) — por ora, subprocess no
+    host com teto de tempo.
+    """
+    print(">>> Executando pytest no workspace...")
+    comando = [sys.executable, "-m", "pytest", "tests", "--tb=short", "-q"]
+    try:
+        r = subprocess.run(
+            comando,
+            cwd=state["workspace"],
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_PYTEST,
+        )
+        saida = (r.stdout + "\n" + r.stderr).strip()[-LIMITE_SAIDA_TESTES:]
+        testes_ok = r.returncode == 0
+        print(f">>> pytest exit code {r.returncode} — {'verde' if testes_ok else 'vermelho'}")
+    except subprocess.TimeoutExpired as e:
+        parcial = str(e.stdout or "")[-2_000:]
+        saida = (
+            f"TIMEOUT: pytest excedeu {TIMEOUT_PYTEST}s — provável loop "
+            f"infinito ou teste travado.\nSaída parcial:\n{parcial}"
+        )
+        testes_ok = False
+        print(">>> pytest estourou o timeout — vermelho")
+    return {
+        "testes_ok": testes_ok,
+        "saida_testes": saida,
+        "feedback_qa": "" if testes_ok else (
+            "Os testes automatizados FALHARAM. Corrija o código (ou os "
+            f"imports/estrutura) com base na saída real do pytest:\n{saida}"
+        ),
+    }
 
 
 def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
     """Gate human-in-the-loop: pausa a execução até um humano decidir."""
     resposta = interrupt(
         {
-            "mensagem": "Código aprovado pela qualidade. Autorizar deploy?",
+            "mensagem": "Autorizar deploy?",
+            "testes_ok": state.get("testes_ok", False),
             "relatorio_qa": state.get("relatorio_qa", ""),
         }
     )
@@ -49,7 +137,7 @@ def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
 
 
 def no_deploy(state: EstadoProjeto) -> EstadoProjeto:
-    """Ação determinística: aqui entraria o comando real de deploy (CI/CD)."""
+    """Ação determinística: aqui entraria o comando real de deploy (Fase 4)."""
     print(">>> Executando deploy...")
     return {"deploy_ok": True}
 
@@ -85,25 +173,56 @@ def no_validacao_spec(state: EstadoProjeto) -> EstadoProjeto:
 
 
 def no_desenvolvimento(state: EstadoProjeto) -> EstadoProjeto:
-    resultado = crew_desenvolvimento().kickoff(
+    crew_desenvolvimento(state["workspace"]).kickoff(
         inputs={
             "spec": state["spec"],
             "feedback_qa": state.get("feedback_qa", "Nenhum — primeira rodada."),
         }
     )
-    return {"codigo": resultado.raw, "tentativas": state["tentativas"] + 1}
+    # O que vale é o que está no disco: o manifesto do estado vem de uma
+    # varredura determinística do workspace, não do texto da crew.
+    arquivos = _arquivos_do_workspace(state["workspace"])
+    return {
+        "arquivos": arquivos,
+        "codigo": _dump_codigo(state["workspace"], arquivos),
+        "tentativas": state["tentativas"] + 1,
+    }
 
 
-def no_qualidade(state: EstadoProjeto) -> EstadoProjeto:
-    resultado = crew_qualidade().kickoff(
-        inputs={"codigo": state["codigo"], "spec": state["spec"]}
+def no_escrever_testes(state: EstadoProjeto) -> EstadoProjeto:
+    crew_testes(state["workspace"]).kickoff(
+        inputs={
+            "spec": state["spec"],
+            "arquivos": "\n".join(state.get("arquivos", [])) or "(workspace vazio)",
+        }
+    )
+    # Revarre o workspace: os testes agora fazem parte da entrega e entram
+    # no dump que o revisor recebe.
+    arquivos = _arquivos_do_workspace(state["workspace"])
+    return {
+        "arquivos": arquivos,
+        "codigo": _dump_codigo(state["workspace"], arquivos),
+    }
+
+
+def no_revisao(state: EstadoProjeto) -> EstadoProjeto:
+    """Revisor LLM: só roda com testes verdes (não paga revisão de código que
+    nem passa). Cobre o que execução não pega."""
+    resultado = crew_revisao().kickoff(
+        inputs={
+            "codigo": state["codigo"],
+            "spec": state["spec"],
+            "saida_testes": state.get("saida_testes", ""),
+        }
     )
     texto = resultado.raw
     aprovado = "APROVADO" in texto.upper().splitlines()[-1] if texto else False
     return {
         "relatorio_qa": texto,
         "aprovado": aprovado,
-        "feedback_qa": "" if aprovado else texto,
+        "feedback_qa": "" if aprovado else (
+            f"A revisão de código reprovou a entrega:\n{texto}"
+        ),
     }
 
 
@@ -121,11 +240,19 @@ def rota_pos_validacao_spec(state: EstadoProjeto) -> str:
     return "planejamento"
 
 
-def rota_pos_qualidade(state: EstadoProjeto) -> str:
+def rota_pos_testes(state: EstadoProjeto) -> str:
+    if state.get("testes_ok"):
+        return "revisao"
+    if state["tentativas"] >= MAX_TENTATIVAS:
+        # Circuit breaker: humano decide o que fazer com o trabalho reprovado.
+        return "aprovacao_humana"
+    return "desenvolvimento"
+
+
+def rota_pos_revisao(state: EstadoProjeto) -> str:
     if state.get("aprovado"):
         return "aprovacao_humana"
     if state["tentativas"] >= MAX_TENTATIVAS:
-        # Circuit breaker: humano decide o que fazer com o trabalho reprovado.
         return "aprovacao_humana"
     return "desenvolvimento"
 
@@ -139,7 +266,9 @@ def construir_grafo():
     g.add_node("planejamento", no_planejamento)
     g.add_node("validacao_spec", no_validacao_spec)
     g.add_node("desenvolvimento", no_desenvolvimento)
-    g.add_node("qualidade", no_qualidade)
+    g.add_node("escrever_testes", no_escrever_testes)
+    g.add_node("executar_testes", no_executar_testes)
+    g.add_node("revisao", no_revisao)
     g.add_node("aprovacao_humana", no_aprovacao_humana)
     g.add_node("deploy", no_deploy)
 
@@ -147,8 +276,10 @@ def construir_grafo():
     g.add_edge("triagem", "planejamento")
     g.add_edge("planejamento", "validacao_spec")
     g.add_conditional_edges("validacao_spec", rota_pos_validacao_spec)
-    g.add_edge("desenvolvimento", "qualidade")
-    g.add_conditional_edges("qualidade", rota_pos_qualidade)
+    g.add_edge("desenvolvimento", "escrever_testes")
+    g.add_edge("escrever_testes", "executar_testes")
+    g.add_conditional_edges("executar_testes", rota_pos_testes)
+    g.add_conditional_edges("revisao", rota_pos_revisao)
     g.add_edge("aprovacao_humana", "deploy")
     g.add_edge("deploy", END)
 

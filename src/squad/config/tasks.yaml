@@ -1,5 +1,6 @@
-# Tarefas de cada crew. Placeholders {pedido}, {spec}, {codigo}, {feedback_qa}
-# são preenchidos pelo nó do LangGraph via inputs do kickoff().
+# Tarefas de cada crew. Placeholders {pedido}, {spec}, {codigo}, {feedback_qa},
+# {arquivos}, {saida_testes} são preenchidos pelo nó do LangGraph via inputs
+# do kickoff().
 
 # --- Crew de planejamento ---
 levantar_requisitos:
@@ -17,6 +18,9 @@ definir_arquitetura:
     não estejam neles. Se um requisito do contexto não se aplicar, ignore-o em
     vez de substituí-lo por outro tema. Produza: componentes, contratos de API,
     modelo de dados (se aplicável) e decisões com trade-offs.
+    A entrega será implementada em Python, usando apenas a biblioteca padrão
+    e estas libs pré-instaladas: fastapi, flask, httpx, requests — não
+    proponha outras tecnologias.
     Limite a spec a no máximo 150 linhas, focando no essencial para implementar.
   expected_output: >
     Spec técnica enxuta (máx. 150 linhas) em markdown, estritamente sobre
@@ -26,46 +30,73 @@ definir_arquitetura:
 # --- Crew de desenvolvimento (sequencial: backend -> frontend -> consolidação) ---
 implementar_backend:
   description: >
-    Implemente a parte de backend da spec abaixo (endpoints, regras, modelos,
-    configuração). Se houver feedback de QA de uma rodada anterior, corrija os
-    pontos apontados antes de qualquer coisa.
+    Implemente a parte de backend da spec abaixo escrevendo ARQUIVOS PYTHON
+    REAIS no workspace com a ferramenta escrever_arquivo — não descreva
+    código em markdown. Use apenas a biblioteca padrão do Python e estas
+    libs pré-instaladas: fastapi, flask, httpx, requests (importar qualquer
+    outra lib fará os testes quebrarem). Coloque os módulos na raiz do
+    workspace ou em subpastas com nomes claros.
+    Se houver feedback de QA de uma rodada anterior, use listar_arquivos e
+    ler_arquivo para conhecer o estado atual e corrija os pontos apontados
+    antes de qualquer coisa.
     Spec: {spec}
     Feedback de QA (se houver): {feedback_qa}
-  expected_output: Código backend completo com instruções de execução.
+  expected_output: >
+    Manifesto dos arquivos criados/alterados (um por linha) com uma frase
+    sobre o papel de cada um.
   agent: dev_backend
 
 implementar_frontend:
   description: >
-    Com base no backend implementado (contexto anterior), implemente a camada
-    de consumo: cliente/integração, exemplos de uso (curl) e configuração
-    necessária. Se a spec não exigir UI, entregue apenas integração e exemplos.
-  expected_output: Código de integração/consumo com exemplos funcionais.
+    Com base no backend implementado (manifesto no contexto anterior),
+    escreva no workspace a camada de consumo como ARQUIVOS REAIS usando
+    escrever_arquivo: cliente Python de integração e exemplos de uso.
+    Antes de escrever, use listar_arquivos e ler_arquivo para conhecer o
+    backend real — importe e chame o que existe, não invente módulos.
+    Se a spec não exigir UI, entregue apenas integração e exemplos.
+    Mesmas restrições de libs do backend.
+  expected_output: >
+    Manifesto dos arquivos de integração criados, um por linha.
   agent: dev_frontend
 
 consolidar_entrega:
   description: >
-    Consolide o trabalho de backend e frontend (contextos anteriores) em uma
-    entrega única e coerente: estrutura de arquivos, código final e instruções
-    de execução. Aponte e resolva qualquer inconsistência entre as partes.
-  expected_output: Entrega final consolidada, pronta para revisão de QA.
+    Inspecione a estrutura real do workspace com listar_arquivos e
+    ler_arquivo e garanta uma entrega única e coerente: corrija
+    inconsistências entre backend e integração editando os arquivos com
+    escrever_arquivo, e escreva um README.md na raiz do workspace com a
+    estrutura de arquivos e as instruções de execução.
+  expected_output: >
+    Manifesto final dos arquivos da entrega, com o README.md incluído.
   agent: tech_lead
 
 # --- Crew de qualidade ---
-testar:
+escrever_testes:
   description: >
-    Escreva e execute testes que validem o código abaixo contra os critérios de
-    aceite da spec. Código: {codigo}
+    Escreva testes pytest REAIS no diretório tests/ do workspace usando a
+    ferramenta escrever_arquivo, validando os critérios de aceite da spec
+    contra o código real do projeto. Antes de escrever, use listar_arquivos
+    e ler_arquivo para conhecer os módulos reais. Arquivos atuais do
+    workspace: {arquivos}
+    Os testes serão executados com pytest a partir da raiz do workspace:
+    importe os módulos pelos caminhos reais e não invente módulos que não
+    existem. Não use libs além de pytest e das pré-instaladas (fastapi,
+    flask, httpx, requests).
     Spec: {spec}
-  expected_output: Relatório de testes com casos cobertos e resultados.
+  expected_output: >
+    Manifesto dos arquivos de teste criados em tests/, com uma linha sobre
+    o que cada um cobre.
   agent: qa_engineer
 
 revisar:
   description: >
-    Revise o código abaixo quanto a legibilidade, segurança e aderência à spec,
-    considerando também o relatório de testes do contexto anterior.
+    Os testes automatizados JÁ FORAM EXECUTADOS pelo pipeline e PASSARAM;
+    a saída real do pytest está abaixo. Sua revisão cobre o que a execução
+    não pega: legibilidade, segurança e aderência do código à spec.
     Conclua com o veredito exato APROVADO ou REPROVADO na última linha,
     listando as correções necessárias quando reprovar.
-    Código: {codigo}
+    Saída do pytest: {saida_testes}
+    Código (lido do workspace): {codigo}
     Spec: {spec}
   expected_output: Revisão com apontamentos e veredito final APROVADO/REPROVADO.
   agent: revisor_codigo
