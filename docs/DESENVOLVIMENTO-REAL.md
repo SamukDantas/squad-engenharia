@@ -16,7 +16,7 @@ ao mundo real supera cinco agentes conversando sobre ele.
 
 ## As cinco fases
 
-> **Status (ago/2026):** Fases 1–6 **implementadas**. Os testes gerados por
+> **Status (ago/2026):** Fases 1–7 **implementadas**. Os testes gerados por
 > LLM rodam em **sandbox Docker** (`TEST_RUNNER=docker`, padrão; `host` é a
 > saída para quem não tem Docker), com ferramentas de arquivo confinadas ao
 > workspace como camada adicional. Entregas são em **Python** (o pytest é o
@@ -76,6 +76,37 @@ cmd.exe (specs longas também esbarrariam no limite de tamanho de argumento).
 O executor é proibido de escrever em `tests/` — quem escreve os testes é o QA
 da squad, mantendo a separação entre quem implementa e quem valida.
 
+### Fase 6 — A jaula de execução
+Os testes deixam de rodar no host e passam a rodar em container efêmero.
+Detalhes na seção "CrewAI vs Docker", abaixo.
+
+### Fase 7 — Quem vigia os testes, e como medir se algo melhorou
+Duas lacunas que o próprio princípio deste roadmap deixou em aberto:
+
+**Testes verdes não provam correção.** O exit code é objetivo, mas o
+*conteúdo* do teste continua sendo opinião de quem o escreveu — o QA pode
+produzir asserções triviais ou ignorar os critérios de aceite. Duas
+checagens complementares, cada uma pegando o que a outra não pega:
+
+1. **Guard de critérios** (semântico, antes de executar): espelha o guard de
+   aderência — uma chamada barata que confere se a suíte testa mesmo o que a
+   spec exige. Reprovar antes da execução custa centavos.
+2. **Cobertura** (determinística, depois de executar): testes verdes com
+   cobertura abaixo de `COBERTURA_MINIMA` indicam suíte que não exercita a
+   entrega.
+
+Os dois devolvem o trabalho ao **QA**, não ao desenvolvimento — problema do
+teste não se corrige reescrevendo o código. É um laço curto, com teto
+próprio (`MAX_TESTES`); ao estourar, o pipeline segue com o sinal fraco
+registrado no estado, visível no gate humano e nas métricas: qualidade de
+teste é sinal mais brando que teste vermelho.
+
+**Não havia como saber se uma fase melhorou o resultado.** Cada nó passou a
+registrar duração e veredito em `metrics/<thread_id>.json`, com resumo
+impresso ao final: rodadas de desenvolvimento e de reescrita de testes,
+histórico de verde/vermelho e cobertura por rodada, vereditos dos guards e
+da revisão, nós mais lentos e onde a entrega foi publicada.
+
 ## O que NÃO muda
 
 A arquitetura validada permanece idêntica: grafo, laços com circuit breakers,
@@ -85,9 +116,11 @@ acontece *dentro* dos nós:
 | Hoje | Versão real |
 |------|-------------|
 | Código como texto no estado | Arquivos no workspace |
-| QA opina sobre testes | pytest executa testes |
-| Veredito = palavra do LLM | Veredito = exit code (+ revisão) |
+| QA opina sobre testes | pytest executa testes numa jaula |
+| Veredito = palavra do LLM | Veredito = exit code + cobertura (+ revisão) |
+| Ninguém vigia a qualidade do teste | Guard de critérios + piso de cobertura |
 | Deploy = print | Deploy = git push / build |
+| Sem saber se melhorou | Métricas por execução |
 
 Todo o investimento em resiliência (RESILIENCIA.md) se transfere direto.
 

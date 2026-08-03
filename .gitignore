@@ -6,3 +6,4 @@ checkpoints.sqlite
 checkpoints.sqlite-shm
 checkpoints.sqlite-wal
 workspace/
+metrics/

@@ -5,8 +5,8 @@ Regra de divisão:
 - trabalho especialista (escrever código, escrever testes, revisar) fica nas
   crews CrewAI;
 - vereditos vêm de execução, não de opinião: o laço de correções é roteado
-  pelo exit code do pytest (nó determinístico), e o revisor LLM cobre apenas
-  o que execução não pega.
+  pelo exit code do pytest e pela cobertura (nós determinísticos), e o revisor
+  LLM cobre apenas o que execução não pega.
 """
 import os
 import sqlite3
@@ -27,13 +27,37 @@ from ..crews.planejamento import crew_planejamento
 from ..crews.qualidade import crew_revisao, crew_testes
 from ..deploy import executar_deploy
 from ..llm import zen_llm
+from ..metricas import medir
 from ..opencode import executar_opencode
 from ..sandbox import executar_testes
 from .state import EstadoProjeto
 
 MAX_TENTATIVAS = 3
 MAX_REPLANEJAMENTOS = 2
+MAX_TESTES = 2                # reescritas da suíte por rodada de desenvolvimento
 LIMITE_DUMP_CODIGO = 15_000   # chars de código injetados na tarefa do revisor
+
+
+def _cobertura_minima() -> float:
+    try:
+        return float(os.getenv("COBERTURA_MINIMA", "70"))
+    except ValueError:
+        return 70.0
+
+
+def _tid(config: RunnableConfig) -> str:
+    return str(config["configurable"]["thread_id"])
+
+
+def _veredito_sim(resposta: object) -> bool:
+    """Parser tolerante de SIM/NAO (RESILIENCIA.md, item 7): modelos enfeitam
+    a resposta, e o caso indecifrável conta como reprova."""
+    normalizado = str(resposta).strip().upper()
+    return normalizado.startswith("SIM") or (
+        "SIM" in normalizado[:20]
+        and "NAO" not in normalizado[:20]
+        and "NÃO" not in normalizado[:20]
+    )
 
 
 # ---------- helpers de workspace ----------
@@ -71,33 +95,62 @@ def _dump_codigo(workspace: str, arquivos: list[str]) -> str:
     return "\n".join(partes)
 
 
+def _dump_testes(workspace: str, arquivos: list[str]) -> str:
+    """Só os arquivos de teste, para o guard de critérios avaliar."""
+    return _dump_codigo(workspace, [a for a in arquivos if a.startswith("tests/")])
+
+
 # ---------- nós determinísticos ----------
 
 def no_triagem(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """Valida a entrada, cria o workspace da execução e zera contadores."""
-    pedido = (state.get("pedido") or "").strip()
-    if not pedido:
-        raise ValueError("Pedido vazio — nada a fazer.")
-    thread_id = config["configurable"]["thread_id"]
-    workspace = Path("workspace") / str(thread_id)
-    workspace.mkdir(parents=True, exist_ok=True)
-    print(f">>> Workspace desta execução: {workspace.resolve()}")
-    return {"pedido": pedido, "tentativas": 0, "workspace": str(workspace.resolve())}
+    thread_id = _tid(config)
+    with medir(thread_id, "triagem"):
+        pedido = (state.get("pedido") or "").strip()
+        if not pedido:
+            raise ValueError("Pedido vazio — nada a fazer.")
+        workspace = Path("workspace") / thread_id
+        workspace.mkdir(parents=True, exist_ok=True)
+        print(f">>> Workspace desta execução: {workspace.resolve()}")
+    return {
+        "pedido": pedido,
+        "tentativas": 0,
+        "testes_tentativas": 0,
+        "workspace": str(workspace.resolve()),
+    }
 
 
 def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """Veredito por execução: roda a suíte na jaula (sandbox Docker por
     padrão) e traduz o resultado em estado. Sem LLM."""
-    thread_id = str(config["configurable"]["thread_id"])
-    resultado = executar_testes(state["workspace"], thread_id)
+    thread_id = _tid(config)
+    with medir(thread_id, "executar_testes", runner=os.getenv("TEST_RUNNER", "docker")) as m:
+        resultado = executar_testes(state["workspace"], thread_id)
+        m.update(testes_ok=resultado["testes_ok"], cobertura=resultado["cobertura"])
+
     saida = resultado["saida_testes"]
-    return {
-        **resultado,
-        "feedback_qa": "" if resultado["testes_ok"] else (
+    cobertura_ok = resultado["cobertura"] >= _cobertura_minima()
+    if resultado["testes_ok"] and not cobertura_ok:
+        print(
+            f">>> Cobertura {resultado['cobertura']}% abaixo do mínimo "
+            f"({_cobertura_minima()}%) — testes não exercitam a entrega."
+        )
+
+    if not resultado["testes_ok"]:
+        feedback = (
             "Os testes automatizados FALHARAM. Corrija o código (ou os "
             f"imports/estrutura) com base na saída real do pytest:\n{saida}"
-        ),
-    }
+        )
+    elif not cobertura_ok:
+        # Problema do teste, não do código: quem reescreve é o QA.
+        feedback = (
+            f"Os testes passam, mas cobrem apenas {resultado['cobertura']}% da "
+            f"entrega (mínimo {_cobertura_minima()}%). Escreva testes que "
+            "exercitem os módulos e os caminhos ainda não cobertos."
+        )
+    else:
+        feedback = ""
+    return {**resultado, "cobertura_ok": cobertura_ok, "feedback_qa": feedback}
 
 
 def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
@@ -106,6 +159,8 @@ def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
         {
             "mensagem": "Autorizar deploy?",
             "testes_ok": state.get("testes_ok", False),
+            "cobertura": state.get("cobertura", 0.0),
+            "testes_aderentes": state.get("testes_aderentes", False),
             "relatorio_qa": state.get("relatorio_qa", ""),
         }
     )
@@ -117,60 +172,63 @@ def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
 def no_deploy(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """Deploy real (Fase 4): git commit + push da entrega, sem LLM. Só roda
     após aprovação humana explícita no gate."""
-    thread_id = config["configurable"]["thread_id"]
-    return executar_deploy(state["workspace"], str(thread_id), state["pedido"])
+    thread_id = _tid(config)
+    with medir(thread_id, "deploy") as m:
+        resultado = executar_deploy(state["workspace"], thread_id, state["pedido"])
+        m.update(deploy_ref=resultado.get("deploy_ref", ""))
+    return resultado
 
 
 # ---------- nós que invocam crews ----------
 
-def no_planejamento(state: EstadoProjeto) -> EstadoProjeto:
-    resultado = crew_planejamento().kickoff(inputs={"pedido": state["pedido"]})
+def no_planejamento(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
+    with medir(_tid(config), "planejamento"):
+        resultado = crew_planejamento().kickoff(inputs={"pedido": state["pedido"]})
     return {
         "spec": resultado.raw,
         "spec_tentativas": state.get("spec_tentativas", 0) + 1,
     }
 
 
-def no_validacao_spec(state: EstadoProjeto) -> EstadoProjeto:
+def no_validacao_spec(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """Guard de aderência: uma chamada única e barata que confere se a spec
     produzida trata mesmo do pedido, antes de gastar tokens com desenvolvimento.
     Protege contra alucinação da crew de planejamento (spec de outro tema)."""
-    veredito = zen_llm().call(
-        "Você é um verificador rigoroso. Responda APENAS com a palavra SIM ou "
-        f'NAO. A especificação técnica abaixo trata do pedido "{state["pedido"]}"'
-        " — mesmo assunto e mesmo escopo, sem substituí-lo por outro tema?\n\n"
-        f"Especificação:\n{state['spec'][:8000]}"
-    )
-    normalizado = str(veredito).strip().upper()
-    coerente = normalizado.startswith("SIM") or (
-        "SIM" in normalizado[:20] and "NAO" not in normalizado[:20]
-        and "NÃO" not in normalizado[:20]
-    )
+    with medir(_tid(config), "validacao_spec") as m:
+        veredito = zen_llm().call(
+            "Você é um verificador rigoroso. Responda APENAS com a palavra SIM ou "
+            f'NAO. A especificação técnica abaixo trata do pedido "{state["pedido"]}"'
+            " — mesmo assunto e mesmo escopo, sem substituí-lo por outro tema?\n\n"
+            f"Especificação:\n{state['spec'][:8000]}"
+        )
+        coerente = _veredito_sim(veredito)
+        m.update(spec_coerente=coerente)
     if not coerente:
-        print(f">>> Guard: spec reprovada (não adere ao pedido). Veredito: {normalizado[:40]}")
+        print(f">>> Guard: spec reprovada (não adere ao pedido). Veredito: {str(veredito)[:40]}")
     return {"spec_coerente": coerente}
 
 
-def no_desenvolvimento(state: EstadoProjeto) -> EstadoProjeto:
+def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """Escreve a implementação no workspace. O executor é intercambiável
     (DEV_EXECUTOR): o OpenCode CLI como mão de obra especialista, ou as crews
     CrewAI como caminho sem dependência externa. A governança do grafo é a
     mesma nos dois casos."""
     executor = os.getenv("DEV_EXECUTOR", "opencode").strip().lower()
     feedback = state.get("feedback_qa", "")
-    if executor == "opencode":
-        executar_opencode(state["workspace"], state["spec"], feedback)
-    elif executor == "crews":
-        crew_desenvolvimento(state["workspace"]).kickoff(
-            inputs={
-                "spec": state["spec"],
-                "feedback_qa": feedback or "Nenhum — primeira rodada.",
-            }
-        )
-    else:
-        raise ValueError(
-            f"DEV_EXECUTOR inválido: '{executor}'. Use 'opencode' ou 'crews'."
-        )
+    with medir(_tid(config), "desenvolvimento", executor=executor):
+        if executor == "opencode":
+            executar_opencode(state["workspace"], state["spec"], feedback)
+        elif executor == "crews":
+            crew_desenvolvimento(state["workspace"]).kickoff(
+                inputs={
+                    "spec": state["spec"],
+                    "feedback_qa": feedback or "Nenhum — primeira rodada.",
+                }
+            )
+        else:
+            raise ValueError(
+                f"DEV_EXECUTOR inválido: '{executor}'. Use 'opencode' ou 'crews'."
+            )
     # O que vale é o que está no disco: o manifesto do estado vem de uma
     # varredura determinística do workspace, não do texto do executor.
     arquivos = _arquivos_do_workspace(state["workspace"])
@@ -178,37 +236,79 @@ def no_desenvolvimento(state: EstadoProjeto) -> EstadoProjeto:
         "arquivos": arquivos,
         "codigo": _dump_codigo(state["workspace"], arquivos),
         "tentativas": state["tentativas"] + 1,
+        # Código novo, suíte nova: o laço de testes recomeça do zero.
+        "testes_tentativas": 0,
     }
 
 
-def no_escrever_testes(state: EstadoProjeto) -> EstadoProjeto:
-    crew_testes(state["workspace"]).kickoff(
-        inputs={
-            "spec": state["spec"],
-            "arquivos": "\n".join(state.get("arquivos", [])) or "(workspace vazio)",
-        }
-    )
+def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
+    with medir(_tid(config), "escrever_testes"):
+        crew_testes(state["workspace"]).kickoff(
+            inputs={
+                "spec": state["spec"],
+                "arquivos": "\n".join(state.get("arquivos", [])) or "(workspace vazio)",
+                "feedback_qa": state.get("feedback_qa", "") or "Nenhum — primeira rodada.",
+            }
+        )
     # Revarre o workspace: os testes agora fazem parte da entrega e entram
     # no dump que o revisor recebe.
     arquivos = _arquivos_do_workspace(state["workspace"])
     return {
         "arquivos": arquivos,
         "codigo": _dump_codigo(state["workspace"], arquivos),
+        "testes_tentativas": state.get("testes_tentativas", 0) + 1,
     }
 
 
-def no_revisao(state: EstadoProjeto) -> EstadoProjeto:
+def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
+    """Guard de critérios: testes verdes não provam correção se a própria
+    suíte ignora os critérios de aceite. Espelha o guard de aderência —
+    uma chamada barata antes de executar, porque reprovar aqui custa
+    centavos e uma rodada inteira do laço custa a execução."""
+    testes = _dump_testes(state["workspace"], state.get("arquivos", []))
+    if not testes.strip():
+        print(">>> Guard de critérios: nenhum arquivo de teste encontrado.")
+        return {"testes_aderentes": False}
+
+    with medir(_tid(config), "validacao_testes") as m:
+        veredito = zen_llm().call(
+            "Você é um verificador rigoroso de testes. Responda APENAS com a "
+            "palavra SIM ou NAO. Os testes abaixo verificam de fato os "
+            "critérios de aceite da especificação — cobrindo o comportamento "
+            "exigido, e não apenas asserções triviais ou detalhes irrelevantes?"
+            f"\n\nEspecificação:\n{state['spec'][:6000]}"
+            f"\n\nTestes:\n{testes[:8000]}"
+        )
+        aderentes = _veredito_sim(veredito)
+        m.update(testes_aderentes=aderentes)
+
+    if not aderentes:
+        print(">>> Guard de critérios: testes não cobrem os critérios de aceite.")
+        return {
+            "testes_aderentes": False,
+            "feedback_qa": (
+                "Os testes escritos não verificam os critérios de aceite da "
+                "spec. Reescreva-os cobrindo o comportamento exigido, com "
+                "asserções sobre resultados reais — não asserções triviais."
+            ),
+        }
+    return {"testes_aderentes": True, "feedback_qa": ""}
+
+
+def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """Revisor LLM: só roda com testes verdes (não paga revisão de código que
     nem passa). Cobre o que execução não pega."""
-    resultado = crew_revisao().kickoff(
-        inputs={
-            "codigo": state["codigo"],
-            "spec": state["spec"],
-            "saida_testes": state.get("saida_testes", ""),
-        }
-    )
-    texto = resultado.raw
-    aprovado = "APROVADO" in texto.upper().splitlines()[-1] if texto else False
+    with medir(_tid(config), "revisao") as m:
+        resultado = crew_revisao().kickoff(
+            inputs={
+                "codigo": state["codigo"],
+                "spec": state["spec"],
+                "saida_testes": state.get("saida_testes", ""),
+            }
+        )
+        texto = resultado.raw
+        aprovado = "APROVADO" in texto.upper().splitlines()[-1] if texto else False
+        m.update(aprovado=aprovado)
     return {
         "relatorio_qa": texto,
         "aprovado": aprovado,
@@ -232,13 +332,30 @@ def rota_pos_validacao_spec(state: EstadoProjeto) -> str:
     return "planejamento"
 
 
+def rota_pos_validacao_testes(state: EstadoProjeto) -> str:
+    """Suíte que não adere aos critérios volta para o QA reescrever. Ao
+    estourar o teto, segue mesmo assim: qualidade de teste é sinal mais
+    brando que teste vermelho, e fica registrado no estado para o gate
+    humano e as métricas."""
+    if state.get("testes_aderentes"):
+        return "executar_testes"
+    if state.get("testes_tentativas", 0) >= MAX_TESTES:
+        print(">>> Guard de critérios: teto de reescritas atingido, seguindo assim mesmo.")
+        return "executar_testes"
+    return "escrever_testes"
+
+
 def rota_pos_testes(state: EstadoProjeto) -> str:
-    if state.get("testes_ok"):
-        return "revisao"
-    if state["tentativas"] >= MAX_TENTATIVAS:
-        # Circuit breaker: humano decide o que fazer com o trabalho reprovado.
-        return "aprovacao_humana"
-    return "desenvolvimento"
+    if not state.get("testes_ok"):
+        if state["tentativas"] >= MAX_TENTATIVAS:
+            # Circuit breaker: humano decide o que fazer com o trabalho reprovado.
+            return "aprovacao_humana"
+        return "desenvolvimento"
+    # Verdes, mas sem exercitar a entrega: problema do teste — laço curto,
+    # só o QA reescreve, sem pagar outra rodada de desenvolvimento.
+    if not state.get("cobertura_ok") and state.get("testes_tentativas", 0) < MAX_TESTES:
+        return "escrever_testes"
+    return "revisao"
 
 
 def rota_pos_revisao(state: EstadoProjeto) -> str:
@@ -259,6 +376,7 @@ def construir_grafo():
     g.add_node("validacao_spec", no_validacao_spec)
     g.add_node("desenvolvimento", no_desenvolvimento)
     g.add_node("escrever_testes", no_escrever_testes)
+    g.add_node("validacao_testes", no_validacao_testes)
     g.add_node("executar_testes", no_executar_testes)
     g.add_node("revisao", no_revisao)
     g.add_node("aprovacao_humana", no_aprovacao_humana)
@@ -269,7 +387,8 @@ def construir_grafo():
     g.add_edge("planejamento", "validacao_spec")
     g.add_conditional_edges("validacao_spec", rota_pos_validacao_spec)
     g.add_edge("desenvolvimento", "escrever_testes")
-    g.add_edge("escrever_testes", "executar_testes")
+    g.add_edge("escrever_testes", "validacao_testes")
+    g.add_conditional_edges("validacao_testes", rota_pos_validacao_testes)
     g.add_conditional_edges("executar_testes", rota_pos_testes)
     g.add_conditional_edges("revisao", rota_pos_revisao)
     g.add_edge("aprovacao_humana", "deploy")

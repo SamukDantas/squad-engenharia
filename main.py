@@ -22,6 +22,7 @@ truststore.inject_into_ssl()
 load_dotenv(override=True)
 
 from src.squad.graph.workflow import construir_grafo  # noqa: E402
+from src.squad.metricas import resumo  # noqa: E402
 
 
 def _rodar(grafo, entrada, config) -> None:
@@ -68,6 +69,7 @@ def main() -> None:
     print("\nDeploy ok:", final.get("deploy_ok", False))
     if final.get("deploy_ref"):
         print("Entrega publicada em:", final["deploy_ref"])
+    print(resumo(thread_id))
 
 
 if __name__ == "__main__":
