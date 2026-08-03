@@ -11,12 +11,17 @@ Triagem → Crew planejamento → Guard de aderência → Crew desenvolvimento �
               ↑____↻ spec incoerente (máx. 2)_|      ↑____________↻ testes vermelhos / revisão reprovada (máx. 3)____↻_|
 ```
 
-Princípio central: **vereditos vêm de execução, não de opinião**. Os devs
-escrevem arquivos Python reais em `workspace/<thread_id>/`, o QA escreve
-testes pytest reais e um nó **determinístico** executa o pytest — o laço de
-correções é roteado pelo **exit code**, não pela palavra de um LLM. O revisor
-LLM só roda com testes verdes e cobre o que execução não pega (legibilidade,
-segurança, aderência à spec).
+Princípio central: **vereditos vêm de execução, não de opinião**. O executor
+de desenvolvimento escreve arquivos Python reais em `workspace/<thread_id>/`,
+o QA escreve testes pytest reais e um nó **determinístico** executa o pytest —
+o laço de correções é roteado pelo **exit code**, não pela palavra de um LLM.
+O revisor LLM só roda com testes verdes e cobre o que execução não pega
+(legibilidade, segurança, aderência à spec).
+
+O nó de desenvolvimento é **intercambiável** (`DEV_EXECUTOR`): por padrão usa
+o **OpenCode CLI** em modo headless como mão de obra, com a squad no papel de
+gerência (guard, QA real e gate governando o executor); `crews` mantém o
+caminho com as crews CrewAI, sem dependência externa.
 
 O **guard de aderência** é uma chamada única de LLM (barata) que confere se a
 spec produzida trata mesmo do pedido antes de gastar tokens com o
@@ -42,6 +47,8 @@ squad-engenharia/
     │   ├── agents.yaml         # definição dos agentes (papéis, goals, backstories)
     │   └── tasks.yaml          # definição das tarefas de cada crew
     ├── tools.py                # ferramentas de arquivo confinadas ao workspace
+    ├── opencode.py             # executor de desenvolvimento via OpenCode CLI
+    ├── deploy.py               # deploy real (git commit + push da entrega)
     ├── crews/
     │   ├── planejamento.py     # analista + arquiteto
     │   ├── desenvolvimento.py  # dev backend + dev integração + tech lead
@@ -69,6 +76,10 @@ O código gerado usa apenas a stdlib e as libs **pré-provisionadas** no
 `requirements.txt` (fastapi, flask, httpx, requests): não há `pip install`
 em runtime — import fora da lista quebra o pytest e vira reprova com stack
 trace real.
+
+No modo padrão (`DEV_EXECUTOR=opencode`) é preciso ter o **OpenCode CLI**
+instalado e autenticado (`npm i -g opencode-ai`). Para rodar sem o CLI, use
+`DEV_EXECUTOR=crews` no `.env`.
 
 Para publicar as entregas aprovadas, configure `DEPLOY_REPO=owner/repo` no
 `.env` (repositório GitHub de entregas; cada execução vira uma branch
