@@ -72,6 +72,8 @@ trace real.
 
 ## Documentação adicional
 
+- [docs/ARQUITETURA.md](docs/ARQUITETURA.md) — diagrama de sequência completo
+  do fluxo (workspace, pytest como juiz, laço de correções e gates).
 - [docs/RESILIENCIA.md](docs/RESILIENCIA.md) — problemas reais encontrados
   (autenticação, alucinação, quedas de provedor, loops) com causa raiz,
   solução e o princípio de arquitetura por trás de cada um.
