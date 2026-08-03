@@ -58,6 +58,9 @@ e seguir ao deploy, retome a execução com o mesmo `thread_id` respondendo `sim
 - [docs/RESILIENCIA.md](docs/RESILIENCIA.md) — problemas reais encontrados
   (autenticação, alucinação, quedas de provedor, loops) com causa raiz,
   solução e o princípio de arquitetura por trás de cada um.
+- [docs/DESENVOLVIMENTO-REAL.md](docs/DESENVOLVIMENTO-REAL.md) — roadmap de
+  evolução de simulação para desenvolvimento real (workspace, QA que executa
+  testes, deploy real) e os padrões de arquitetura que o projeto usa.
 
 ## Decisões de projeto
 
