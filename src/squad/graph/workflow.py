@@ -10,8 +10,6 @@ Regra de divisão:
 """
 import os
 import sqlite3
-import subprocess
-import sys
 from pathlib import Path
 
 from langchain_core.runnables import RunnableConfig
@@ -30,13 +28,12 @@ from ..crews.qualidade import crew_revisao, crew_testes
 from ..deploy import executar_deploy
 from ..llm import zen_llm
 from ..opencode import executar_opencode
+from ..sandbox import executar_testes
 from .state import EstadoProjeto
 
 MAX_TENTATIVAS = 3
 MAX_REPLANEJAMENTOS = 2
-TIMEOUT_PYTEST = 120          # segundos; estourou = reprova (loop infinito etc.)
 LIMITE_DUMP_CODIGO = 15_000   # chars de código injetados na tarefa do revisor
-LIMITE_SAIDA_TESTES = 8_000   # chars da saída do pytest guardados no estado
 
 
 # ---------- helpers de workspace ----------
@@ -88,40 +85,15 @@ def no_triagem(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     return {"pedido": pedido, "tentativas": 0, "workspace": str(workspace.resolve())}
 
 
-def no_executar_testes(state: EstadoProjeto) -> EstadoProjeto:
-    """Veredito por execução: roda o pytest de verdade no workspace.
-
-    Sem LLM. Exit code 0 = verde; qualquer outro (inclusive 5, "nenhum teste
-    coletado") = vermelho. Timeout = vermelho. O sandbox Docker desta etapa é
-    migração futura (docs/DESENVOLVIMENTO-REAL.md) — por ora, subprocess no
-    host com teto de tempo.
-    """
-    print(">>> Executando pytest no workspace...")
-    comando = [sys.executable, "-m", "pytest", "tests", "--tb=short", "-q"]
-    try:
-        r = subprocess.run(
-            comando,
-            cwd=state["workspace"],
-            capture_output=True,
-            text=True,
-            stdin=subprocess.DEVNULL,  # teste que pede input falha, não trava
-            timeout=TIMEOUT_PYTEST,
-        )
-        saida = (r.stdout + "\n" + r.stderr).strip()[-LIMITE_SAIDA_TESTES:]
-        testes_ok = r.returncode == 0
-        print(f">>> pytest exit code {r.returncode} — {'verde' if testes_ok else 'vermelho'}")
-    except subprocess.TimeoutExpired as e:
-        parcial = str(e.stdout or "")[-2_000:]
-        saida = (
-            f"TIMEOUT: pytest excedeu {TIMEOUT_PYTEST}s — provável loop "
-            f"infinito ou teste travado.\nSaída parcial:\n{parcial}"
-        )
-        testes_ok = False
-        print(">>> pytest estourou o timeout — vermelho")
+def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
+    """Veredito por execução: roda a suíte na jaula (sandbox Docker por
+    padrão) e traduz o resultado em estado. Sem LLM."""
+    thread_id = str(config["configurable"]["thread_id"])
+    resultado = executar_testes(state["workspace"], thread_id)
+    saida = resultado["saida_testes"]
     return {
-        "testes_ok": testes_ok,
-        "saida_testes": saida,
-        "feedback_qa": "" if testes_ok else (
+        **resultado,
+        "feedback_qa": "" if resultado["testes_ok"] else (
             "Os testes automatizados FALHARAM. Corrija o código (ou os "
             f"imports/estrutura) com base na saída real do pytest:\n{saida}"
         ),

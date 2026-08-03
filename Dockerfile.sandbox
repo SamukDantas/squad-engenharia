@@ -1,0 +1,25 @@
+# Jaula de execução dos testes gerados por LLM (Fase 6).
+#
+# A imagem carrega o ambiente pré-provisionado pronto: com as dependências já
+# instaladas, o container roda com --network none e não há pip install em
+# runtime — import de lib alucinada vira reprova com stack trace, não download.
+#
+# Build (uma vez):
+#   docker build -f Dockerfile.sandbox -t squad-sandbox:latest .
+FROM python:3.12-slim
+
+# Mesmo conjunto do requirements.txt (ambiente pré-provisionado do código
+# gerado). Mantenha as duas listas em sincronia.
+RUN pip install --no-cache-dir \
+    pytest==8.4.2 \
+    pytest-cov==7.0.0 \
+    fastapi==0.121.2 \
+    httpx==0.28.1 \
+    flask==3.1.2 \
+    requests==2.32.5
+
+# Usuário sem privilégios: nem dentro da jaula o código gerado roda como root.
+RUN useradd --create-home --uid 1000 sandbox
+USER sandbox
+
+WORKDIR /app

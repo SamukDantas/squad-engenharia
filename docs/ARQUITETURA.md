@@ -1,10 +1,10 @@
 # Arquitetura — Diagrama de Sequência
 
-Fluxo completo de uma execução após as Fases 1–3 do
+Fluxo completo de uma execução após as Fases 1–6 do
 [roadmap](DESENVOLVIMENTO-REAL.md): o disco (workspace) vira um ator, a
 qualidade se divide em três participantes (crew de testes, pytest e crew de
-revisão) e o laço de correções é roteado pelo **exit code do pytest** —
-vereditos vêm de execução, não de opinião.
+revisão) e o laço de correções é roteado pelo **exit code do pytest**,
+executado numa jaula Docker — vereditos vêm de execução, não de opinião.
 
 ```mermaid
 ---
@@ -21,7 +21,7 @@ sequenceDiagram
     participant D as Executor de Desenvolvimento (OpenCode CLI ou crews CrewAI)
     participant T as Crew Testes (QA escreve pytest)
     participant WS as Workspace (workspace/thread_id)
-    participant PT as pytest (subprocess, timeout 120s)
+    participant PT as pytest em sandbox Docker (sem rede, timeout 120s)
     participant R as Crew Revisão (revisor LLM)
     participant DP as Deploy
 
@@ -49,8 +49,8 @@ sequenceDiagram
         G->>CK: salva checkpoint
         G->>T: kickoff(spec, arquivos)
         T->>WS: escreve testes reais em tests/
-        G->>PT: executa pytest no workspace (nó sem LLM)
-        PT-->>G: exit code + saída real
+        G->>PT: executa pytest na jaula (entrega read-only, nó sem LLM)
+        PT-->>G: exit code + saída real + cobertura
         G->>CK: salva checkpoint
         alt exit ≠ 0 (falha, nenhum teste coletado ou timeout)
             Note over G,D: feedback_qa = stack trace real do pytest<br/>volta ao desenvolvimento (3ª tentativa: circuit breaker → gate humano)
@@ -91,8 +91,11 @@ sequenceDiagram
    revisão aprovada.
 5. **Separação entre implementar e validar**: quem escreve o código não
    escreve os testes — o executor é proibido de tocar em `tests/`.
-6. **O grafo lê o disco**: manifesto de arquivos e dump de código vêm de
+6. **Jaula de execução**: código gerado por LLM roda em container efêmero,
+   com a entrega montada read-only, sem rede e com limites de recursos —
+   `.squad/out` é a única superfície de escrita (relatório de cobertura).
+7. **O grafo lê o disco**: manifesto de arquivos e dump de código vêm de
    varredura determinística do workspace, injetados nas tarefas que decidem
    roteamento (RESILIENCIA.md, item 10).
-7. **Circuit breakers**: 2 replanejamentos (depois erro explícito) e 3
+8. **Circuit breakers**: 2 replanejamentos (depois erro explícito) e 3
    rodadas de correção (depois o gate humano decide).

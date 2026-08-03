@@ -16,16 +16,15 @@ ao mundo real supera cinco agentes conversando sobre ele.
 
 ## As cinco fases
 
-> **Status (ago/2026):** Fases 1–5 **implementadas** — resta a migração do
-> sandbox de testes para Docker. Decisão de escopo: a
-> execução dos testes roda em **subprocess no host com teto de tempo** (e
-> ferramentas de arquivo confinadas ao workspace como jaula mínima); o
-> sandbox Docker descrito na seção "CrewAI vs Docker" fica como **migração
-> futura**, junto com a Fase 5. Entregas são em **Python** (o pytest é o
+> **Status (ago/2026):** Fases 1–6 **implementadas**. Os testes gerados por
+> LLM rodam em **sandbox Docker** (`TEST_RUNNER=docker`, padrão; `host` é a
+> saída para quem não tem Docker), com ferramentas de arquivo confinadas ao
+> workspace como camada adicional. Entregas são em **Python** (o pytest é o
 > juiz) e as dependências do código gerado vêm de um **ambiente
-> pré-provisionado** no requirements.txt — sem pip install em runtime.
-> O deploy publica a entrega na branch `entrega/<thread_id>` do repositório
-> configurado em `DEPLOY_REPO` (sem a variável, commit local apenas).
+> pré-provisionado** (requirements.txt e a imagem do sandbox) — sem pip
+> install em runtime. O deploy publica a entrega na branch
+> `entrega/<thread_id>` do repositório configurado em `DEPLOY_REPO` (sem a
+> variável, commit local apenas).
 
 ### Fase 1 — Workspace real por execução
 Uma pasta `workspace/<thread_id>/` onde o código vive como **arquivos**, não
@@ -41,9 +40,8 @@ reais no workspace, em vez de descrever código em markdown.
 ### Fase 3 — QA que executa (a mudança mais importante)
 O nó de qualidade vira dois passos:
 1. **Determinístico**: roda `pytest` de verdade — veredito objetivo
-   (exit code + relatório de falhas). Hoje em subprocess no host com
-   timeout; o **sandbox Docker** (ver seção "CrewAI vs Docker" abaixo) é a
-   migração futura desta etapa;
+   (exit code + relatório de falhas), hoje dentro do **sandbox Docker**
+   (ver seção "CrewAI vs Docker" abaixo, implementada na Fase 6);
 2. **Revisor LLM**: continua existindo para o que execução não pega —
    legibilidade, segurança, aderência à spec.
 
@@ -153,7 +151,14 @@ HTTP. Trade-offs:
 o LangGraph continuaria necessário. Containerizar os agentes multiplica a
 infraestrutura para o mesmo resultado lógico.
 
-### Onde o Docker entra de verdade: a jaula de execução (Fase 3)
+### Onde o Docker entra de verdade: a jaula de execução (Fase 6)
+
+> **Implementado.** `src/squad/sandbox.py` com `TEST_RUNNER=docker` (padrão) e
+> a imagem `squad-sandbox:latest` (`Dockerfile.sandbox`). Não há fallback
+> silencioso para o host: se o daemon ou a imagem faltarem, o nó falha alto e
+> nomeia as duas saídas — cair para fora da jaula justamente quando ela falha
+> é o pior momento para rodar código não confiável na máquina.
+
 
 A Fase 3 implica **executar código escrito por LLM** na máquina do operador.
 Código gerado por modelo pode conter qualquer coisa — um `rm` mal colocado,

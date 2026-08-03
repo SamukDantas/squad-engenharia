@@ -48,6 +48,7 @@ squad-engenharia/
     │   └── tasks.yaml          # definição das tarefas de cada crew
     ├── tools.py                # ferramentas de arquivo confinadas ao workspace
     ├── opencode.py             # executor de desenvolvimento via OpenCode CLI
+    ├── sandbox.py              # jaula de execução dos testes (Docker/host)
     ├── deploy.py               # deploy real (git commit + push da entrega)
     ├── crews/
     │   ├── planejamento.py     # analista + arquiteto
@@ -81,6 +82,16 @@ No modo padrão (`DEV_EXECUTOR=opencode`) é preciso ter o **OpenCode CLI**
 instalado e autenticado (`npm i -g opencode-ai`). Para rodar sem o CLI, use
 `DEV_EXECUTOR=crews` no `.env`.
 
+Os testes gerados rodam em **sandbox Docker** (`TEST_RUNNER=docker`, padrão).
+Construa a imagem uma vez:
+
+```bash
+docker build -f Dockerfile.sandbox -t squad-sandbox:latest .
+```
+
+Sem Docker, use `TEST_RUNNER=host` — os testes passam a rodar direto na sua
+máquina, **sem jaula**.
+
 Para publicar as entregas aprovadas, configure `DEPLOY_REPO=owner/repo` no
 `.env` (repositório GitHub de entregas; cada execução vira uma branch
 `entrega/<thread_id>`). Sem a variável, o deploy commita apenas localmente.
@@ -98,9 +109,12 @@ Para publicar as entregas aprovadas, configure `DEPLOY_REPO=owner/repo` no
 
 ## Decisões de projeto
 
-- Aprovação automática exige **testes verdes E revisão aprovada**; o pytest
-  roda em subprocess com timeout de 120s (timeout = reprova). O sandbox
-  Docker desta etapa é migração futura (ver docs/DESENVOLVIMENTO-REAL.md).
+- Aprovação automática exige **testes verdes E revisão aprovada**. O pytest
+  roda em container efêmero — entrega montada read-only, `--network none`,
+  512MB/1 CPU e timeout de 120s (timeout = reprova, com `docker kill`).
+- Não há fallback silencioso do sandbox para o host: sem Docker, o nó falha
+  alto e nomeia as saídas. Perder a jaula justamente quando ela falha é o
+  pior momento para rodar código não confiável na máquina.
 - O deploy é real: após o gate humano, a entrega é commitada e publicada na
   branch `entrega/<thread_id>` do repo configurado em `DEPLOY_REPO` (sem a
   variável, commit local no workspace apenas).
