@@ -49,6 +49,7 @@ squad-engenharia/
     ├── tools.py                # ferramentas de arquivo confinadas ao workspace
     ├── opencode.py             # executor de desenvolvimento via OpenCode CLI
     ├── sandbox.py              # jaula de execução dos testes (Docker/host)
+    ├── metricas.py             # métricas por execução (metrics/<thread_id>.json)
     ├── deploy.py               # deploy real (git commit + push da entrega)
     ├── crews/
     │   ├── planejamento.py     # analista + arquiteto
@@ -115,6 +116,11 @@ Para publicar as entregas aprovadas, configure `DEPLOY_REPO=owner/repo` no
 - Não há fallback silencioso do sandbox para o host: sem Docker, o nó falha
   alto e nomeia as saídas. Perder a jaula justamente quando ela falha é o
   pior momento para rodar código não confiável na máquina.
+- Testes verdes não bastam: um **guard de critérios** (antes de executar) e um
+  **piso de cobertura** (depois) devolvem suítes fracas ao QA — num laço curto,
+  sem pagar outra rodada de desenvolvimento.
+- Cada execução grava `metrics/<thread_id>.json` com duração e veredito por nó,
+  e imprime o resumo ao final — é o que permite comparar duas execuções.
 - O deploy é real: após o gate humano, a entrega é commitada e publicada na
   branch `entrega/<thread_id>` do repo configurado em `DEPLOY_REPO` (sem a
   variável, commit local no workspace apenas).

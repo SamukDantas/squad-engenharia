@@ -82,7 +82,10 @@ escrever_testes:
     importe os módulos pelos caminhos reais e não invente módulos que não
     existem. Não use libs além de pytest e das pré-instaladas (fastapi,
     flask, httpx, requests).
+    Se houver retorno de uma rodada anterior (abaixo), trate-o como
+    prioridade: reescreva ou complemente os testes conforme apontado.
     Spec: {spec}
+    Retorno da rodada anterior (se houver): {feedback_qa}
   expected_output: >
     Manifesto dos arquivos de teste criados em tests/, com uma linha sobre
     o que cada um cobre.
