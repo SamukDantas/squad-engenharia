@@ -2,7 +2,10 @@
 
 Registro dos problemas reais encontrados durante a construção e validação da
 squad, com causa raiz, solução aplicada e o princípio de arquitetura por trás.
-Todos ocorreram em execuções reais (jul/2026) usando OpenCode Zen como provedor.
+Todos ocorreram em execuções reais (jul–ago/2026) usando OpenCode Zen como
+provedor. Os itens 1–10 vêm da squad em modo simulação; os itens 11–14
+apareceram na evolução para desenvolvimento real (Fases 1–5), quando os
+agentes ganharam disco, ferramentas e processos externos.
 
 ---
 
@@ -194,15 +197,116 @@ decisão final ao humano (camada 3).
 
 ---
 
+## 11. Inspeção TLS na rede: o bundle do certifi não conhece o emissor
+
+**Sintoma:** `Failed to connect to OpenAI API: Connection error` em toda
+chamada de LLM, e `git push` falhando com `unable to get local issuer
+certificate`. A chave estava correta e o endpoint, no ar.
+
+**Causa raiz:** a rede tem inspeção TLS (proxy/antivírus corporativo). O
+certificado apresentado é reassinado por um interceptador cuja CA raiz existe
+apenas no repositório de certificados do **sistema operacional** — não no
+bundle próprio de cada ferramenta (`certifi` no Python, `ca-bundle.crt` do
+OpenSSL no Git).
+
+**Solução:** validar pela cadeia de confiança do SO, sem afrouxar a
+verificação — `truststore.inject_into_ssl()` no início do `main.py` e
+`git config --global http.sslBackend schannel`.
+
+**Princípio:** em rede com inspeção TLS, o dono da confiança é o sistema
+operacional; ferramentas com bundle próprio ficam cegas. A saída é apontar
+para o trust store do SO — **nunca** desabilitar a verificação
+(`verify=False`, `sslVerify false`), que troca um problema de configuração
+por um buraco de segurança permanente.
+
+---
+
+## 12. Dar ferramentas aos agentes muda o requisito de modelo (HTTP 400)
+
+**Sintoma:** após a Fase 2 (devs com ferramentas de arquivo), toda chamada da
+crew de desenvolvimento passou a falhar com
+`400 — DFLASH speculative decoding does not support grammar-constrained
+decoding yet`. O mesmo modelo funcionava perfeitamente antes.
+
+**Causa raiz:** o modelo gratuito configurado não suporta *grammar-constrained
+decoding*, a técnica que o CrewAI usa para tool calling estruturado. Enquanto
+os agentes só produziam texto livre, a limitação era invisível; ao ganharem
+ferramentas, ela virou falha total.
+
+**Solução:** trocar para um modelo com suporte a tool calling e documentar o
+requisito no `.env.example` — a escolha de modelo passou a ser função do
+**modo de uso**, não só do catálogo.
+
+**Princípio:** capacidade de tool calling é dependência funcional, não
+detalhe de performance. Mudanças de arquitetura reprecificam o requisito de
+modelo: valide o modelo contra o *como ele vai ser usado* (complementa o
+item 2, que trata apenas da existência do ID no catálogo).
+
+---
+
+## 13. Argumento multilinha truncado pelo shim `.CMD` (falha silenciosa)
+
+**Sintoma:** o OpenCode CLI respondeu "não encontrei nenhuma especificação
+técnica na sua mensagem" e terminou com **exit 0**. A spec havia sumido no
+caminho, sem erro algum.
+
+**Causa raiz:** no Windows, `shutil.which("opencode")` resolve o shim
+`opencode.CMD` instalado pelo npm; os argumentos passam por cmd.exe, que
+**trunca na primeira quebra de linha**. Prompt de uma linha funcionava,
+multilinha não. Specs longas ainda esbarrariam no limite de tamanho de
+argumento (~8 mil caracteres).
+
+**Solução:** as instruções passaram a ser escritas em `.squad/tarefa.md`
+dentro do workspace, com o prompt do CLI reduzido a uma linha única apontando
+para o arquivo. O diretório `.squad/` é excluído da varredura do manifesto e
+do `.gitignore` da entrega — instrução da gerência não é artefato de entrega.
+
+**Princípio:** falha silenciosa é pior que erro — o executor seguiu feliz com
+metade do prompt e o pipeline teria "funcionado" produzindo a coisa errada.
+Ao integrar um processo externo, passe payload grande por **arquivo**, não
+por argumento: limites de shell variam por SO e degradam sem avisar.
+
+---
+
+## 14. Subprocesso herdando stdin engoliu a aprovação humana
+
+**Sintoma:** `EOFError: EOF when reading a line` exatamente no gate humano,
+depois do pipeline inteiro ter rodado — planejamento, guard, implementação,
+testes e laço de correções, todos concluídos.
+
+**Causa raiz:** `subprocess.run` sem `stdin=` **herda o stdin do processo
+pai**. O OpenCode CLI consumiu a resposta que estava no buffer de entrada
+destinada ao gate. Além de quebrar a aprovação, um subprocesso interativo
+poderia travar o pipeline esperando input que nunca chegaria.
+
+**Solução:** `stdin=subprocess.DEVNULL` em todos os subprocessos — CLI, git e
+pytest. A execução afetada foi recuperada com `--thread` a partir do
+checkpoint, sem repetir nenhum nó pago (item 6 provando seu valor de novo).
+
+**Princípio:** processo filho herda mais do que se imagina. Todo subprocesso
+não interativo deve declarar stdin fechado — senão compete pela entrada do
+processo pai. O agravante é o local da falha: quanto mais tarde no pipeline,
+mais caro o retrabalho — e o gate humano é o último nó.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
 Camada 1 — Guard de aderência   (barato, automático)  → pega tema errado
-Camada 2 — Laço de QA           (caro, automático)    → pega defeito de implementação
-Camada 3 — Gate humano          (manual)              → segura ação irreversível
+Camada 2 — pytest real          (barato, determinístico) → pega defeito que executa errado
+Camada 3 — Revisor LLM          (caro, automático)    → pega o que passa nos testes
+Camada 4 — Gate humano          (manual)              → segura ação irreversível
 Transversal — Checkpoints SQLite + circuit breakers + parsers tolerantes
+            + confinamento de ferramentas ao workspace
 ```
 
 Cada camada pega uma classe de erro que as outras não pegam; nenhuma sozinha
 seria suficiente. Todos os itens deste documento foram descobertos e validados
 em execuções reais — não são hipóteses de design.
+
+Com as Fases 1–5, a camada 2 deixou de ser opinião de LLM e virou **execução**:
+o laço de correções é roteado pelo exit code do pytest, e o revisor só é
+acionado com testes verdes. O item 7 (parsers tolerantes) continua valendo
+onde LLM ainda decide — guard de aderência e veredito da revisão —, mas o
+sinal mais caro do grafo passou a ser objetivo.
