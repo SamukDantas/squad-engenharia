@@ -68,10 +68,10 @@ sequenceDiagram
     G->>U: interrupt( ) Autorizar deploy? (sim/nao)
     Note over G,CK: execução pausada e persistida —<br/>sobrevive a queda do processo
     U->>G: sim
-    G->>DP: executa deploy (nó determinístico — real na Fase 4)
-    DP-->>G: deploy_ok = true
+    G->>DP: git commit + push entrega/thread_id (nó determinístico)
+    DP-->>G: deploy_ok = true, deploy_ref
     G->>CK: checkpoint final
-    G-->>U: Deploy ok: True + entrega em workspace/thread_id/
+    G-->>U: Deploy ok: True + entrega publicada em deploy_ref
 ```
 
 ## Pontos estruturais

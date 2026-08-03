@@ -17,3 +17,4 @@ class EstadoProjeto(TypedDict, total=False):
     aprovado: bool       # veredito do revisor
     tentativas: int      # contador do laço de correções
     deploy_ok: bool      # resultado do nó de deploy
+    deploy_ref: str      # onde a entrega foi publicada (repo@branch ou commit local)
