@@ -70,6 +70,10 @@ O código gerado usa apenas a stdlib e as libs **pré-provisionadas** no
 em runtime — import fora da lista quebra o pytest e vira reprova com stack
 trace real.
 
+Para publicar as entregas aprovadas, configure `DEPLOY_REPO=owner/repo` no
+`.env` (repositório GitHub de entregas; cada execução vira uma branch
+`entrega/<thread_id>`). Sem a variável, o deploy commita apenas localmente.
+
 ## Documentação adicional
 
 - [docs/ARQUITETURA.md](docs/ARQUITETURA.md) — diagrama de sequência completo
@@ -86,6 +90,9 @@ trace real.
 - Aprovação automática exige **testes verdes E revisão aprovada**; o pytest
   roda em subprocess com timeout de 120s (timeout = reprova). O sandbox
   Docker desta etapa é migração futura (ver docs/DESENVOLVIMENTO-REAL.md).
+- O deploy é real: após o gate humano, a entrega é commitada e publicada na
+  branch `entrega/<thread_id>` do repo configurado em `DEPLOY_REPO` (sem a
+  variável, commit local no workspace apenas).
 - O laço de correções tem limite de 3 tentativas — ao estourar, o gate humano
   decide o que fazer com o trabalho reprovado.
 - As ferramentas de arquivo são customizadas e **confinadas ao workspace**

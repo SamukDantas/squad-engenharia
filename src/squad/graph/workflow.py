@@ -26,6 +26,7 @@ except ImportError:  # pacote opcional ausente: cai no checkpointer em memória
 from ..crews.desenvolvimento import crew_desenvolvimento
 from ..crews.planejamento import crew_planejamento
 from ..crews.qualidade import crew_revisao, crew_testes
+from ..deploy import executar_deploy
 from ..llm import zen_llm
 from .state import EstadoProjeto
 
@@ -136,10 +137,11 @@ def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
     return {}
 
 
-def no_deploy(state: EstadoProjeto) -> EstadoProjeto:
-    """Ação determinística: aqui entraria o comando real de deploy (Fase 4)."""
-    print(">>> Executando deploy...")
-    return {"deploy_ok": True}
+def no_deploy(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
+    """Deploy real (Fase 4): git commit + push da entrega, sem LLM. Só roda
+    após aprovação humana explícita no gate."""
+    thread_id = config["configurable"]["thread_id"]
+    return executar_deploy(state["workspace"], str(thread_id), state["pedido"])
 
 
 # ---------- nós que invocam crews ----------

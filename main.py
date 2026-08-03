@@ -66,6 +66,8 @@ def main() -> None:
 
     final = grafo.get_state(config).values
     print("\nDeploy ok:", final.get("deploy_ok", False))
+    if final.get("deploy_ref"):
+        print("Entrega publicada em:", final["deploy_ref"])
 
 
 if __name__ == "__main__":

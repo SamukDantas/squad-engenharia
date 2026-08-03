@@ -16,13 +16,15 @@ ao mundo real supera cinco agentes conversando sobre ele.
 
 ## As cinco fases
 
-> **Status (ago/2026):** Fases 1–3 **implementadas**. Decisão de escopo: a
+> **Status (ago/2026):** Fases 1–4 **implementadas**. Decisão de escopo: a
 > execução dos testes roda em **subprocess no host com teto de tempo** (e
 > ferramentas de arquivo confinadas ao workspace como jaula mínima); o
 > sandbox Docker descrito na seção "CrewAI vs Docker" fica como **migração
-> futura**, junto com as Fases 4–5. Entregas são em **Python** (o pytest é o
+> futura**, junto com a Fase 5. Entregas são em **Python** (o pytest é o
 > juiz) e as dependências do código gerado vêm de um **ambiente
 > pré-provisionado** no requirements.txt — sem pip install em runtime.
+> O deploy publica a entrega na branch `entrega/<thread_id>` do repositório
+> configurado em `DEPLOY_REPO` (sem a variável, commit local apenas).
 
 ### Fase 1 — Workspace real por execução
 Uma pasta `workspace/<thread_id>/` onde o código vive como **arquivos**, não
@@ -51,6 +53,13 @@ o dev do que crítica textual.
 ### Fase 4 — Deploy real
 O nó de deploy deixa de ser um `print` e executa `git commit` + `push` (ou
 build de container), atrás do mesmo gate humano.
+
+*Desenho implementado:* o workspace vira repositório git próprio; a entrega
+é commitada (com `.gitignore` para caches de execução) e publicada na branch
+`entrega/<thread_id>` do repositório alvo fixo (`DEPLOY_REPO=owner/repo` no
+`.env`). Sem `DEPLOY_REPO`, degrada para commit local com aviso. Falha de
+git (exit != 0 ou timeout) levanta erro explícito — o checkpoint preserva o
+progresso e `--thread` retoma reexecutando só o deploy.
 
 ### Fase 5 — OpenCode como músculo (futuro)
 O nó de desenvolvimento invoca o OpenCode CLI em modo headless
