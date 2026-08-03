@@ -6,7 +6,10 @@ Todos ocorreram em execuções reais (jul–ago/2026) usando OpenCode Zen como
 provedor. Os itens 1–10 vêm da squad em modo simulação; os itens 11–14
 apareceram na evolução para desenvolvimento real (Fases 1–5), quando os
 agentes ganharam disco, ferramentas e processos externos; os itens 15–16
-surgiram ao mover a execução dos testes para uma jaula Docker (Fase 6).
+surgiram ao mover a execução dos testes para uma jaula Docker (Fase 6); os
+itens 17–19 vieram da primeira execução com um pedido **complexo** (API REST
+com persistência), que é quando as defesas dimensionadas para um arquivo
+encontraram um projeto de verdade.
 
 ---
 
@@ -338,6 +341,83 @@ suspeito de qualquer divergência é a **linha de comando**, não o código.
 
 ---
 
+## 17. Cobertura agregada esconde o módulo que importa
+
+**Sintoma:** primeira execução com pedido complexo (API REST de tarefas com
+CRUD, SQLite, filtro e paginação). Cobertura de **89,4%**, folgada acima do
+piso de 70% — e **nenhum teste exercitava os endpoints HTTP**. A API, objeto
+do pedido, estava praticamente sem teste.
+
+**Causa raiz:** por arquivo, `repository.py`, `models.py` e `schemas.py`
+estavam em 100%, enquanto `routers/tasks.py` — as rotas — ficava em **51,7%**.
+Módulos fáceis e bem testados puxam a média e mascaram o difícil. O piso
+agregado media a suíte inteira, não o que a suíte deixou de fora.
+
+**Agravante:** o guard de critérios reprovou nas seis tentativas, com razão.
+Mas ele é consultivo: estourado o `MAX_TESTES`, o pipeline segue. O sinal
+certo existiu, foi registrado e nenhuma camada acima dele reagiu.
+
+**Solução:** piso **por módulo** (`COBERTURA_MINIMA_MODULO`, padrão 60%)
+calculado sobre o arquivo menos coberto, lido do mesmo `coverage.json`.
+Reprovar devolve ao QA com o arquivo nomeado no feedback. Um sinal semântico
+que ninguém obedece vira um sinal determinístico que bloqueia.
+
+**Princípio:** métrica agregada é média, e média esconde exatamente o que se
+quer encontrar. Quando um número decide roteamento, meça também o **pior
+caso** — e prefira transformar um veredito consultivo repetidamente ignorado
+em regra executável, em vez de aumentar a severidade do aviso.
+
+---
+
+## 18. Guard que julga por amostra sem saber que é amostra
+
+**Sintoma:** o guard de critérios reprovava sistematicamente a suíte de um
+projeto multi-arquivo (6 de 6 tentativas).
+
+**Causa raiz:** o prompt recebia os primeiros 8.000 caracteres da suíte
+concatenada — **48%** dos 16.506 reais. A ordem é alfabética, então arquivos
+no fim ficavam invisíveis: um `test_routers.py` existente seria julgado como
+inexistente. Neste caso o veredito estava certo por outro motivo (não havia
+mesmo testes de endpoint), o que é pior — o acerto acidental esconderia o
+defeito por muito tempo.
+
+**Solução:** amostra com **todos os arquivos representados** — manifesto
+completo da suíte mais uma fatia de cada arquivo, com o orçamento dividido
+entre eles e marcação explícita de truncagem por arquivo.
+
+**Princípio:** truncar contexto é inevitável; truncar **enviesado** não.
+Se o julgamento é sobre um conjunto, a amostra precisa cobrir o conjunto —
+cortar pelo total elimina sempre os mesmos elementos e produz um veredito
+confiante sobre o que o modelo nunca viu.
+
+---
+
+## 19. Rastro do executor virando entrega
+
+**Sintoma:** a entrega continha `test_output.txt`, `full_test_result.txt`,
+`install_output.txt`, `test_result.txt` e um `pywhere.txt` vazio, na raiz do
+projeto — tudo a caminho do deploy.
+
+**Causa raiz:** o executor roda comandos no workspace e salva a saída em
+arquivos. Como a varredura do manifesto trata o workspace inteiro como
+entrega, o rastro entrou no dump enviado ao revisor (gastando contexto) e
+seria publicado.
+
+**Solução em duas camadas:** instrução explícita ao executor (nada de arquivos
+de rastro; transitório vai para `.squad/`) e filtro por padrão de nome
+(`*.log`, `*_output.txt`, `*_result.txt`) no manifesto e no `.gitignore` da
+entrega. O filtro é deliberadamente conservador: não descarta por tamanho,
+porque arquivo vazio pode ser legítimo (`py.typed`, `__init__.py`) — e por
+isso um nome arbitrário como `pywhere.txt` ainda passa. A prevenção no prompt
+é a defesa principal; o filtro é a rede.
+
+**Princípio:** quem trabalha num diretório deixa rastro. Separe cedo o que é
+**entrega** do que é **subproduto do trabalho** — e prefira prevenir na
+instrução a adivinhar por heurística depois, porque heurística sobre nome de
+arquivo erra nos dois sentidos.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
@@ -345,6 +425,7 @@ Camada 1 — Guard de aderência   (barato, automático)     → pega tema errad
 Camada 2 — Guard de critérios   (barato, automático)     → pega suíte que não testa a spec
 Camada 3 — pytest na jaula      (barato, determinístico) → pega defeito que executa errado
 Camada 4 — Piso de cobertura    (barato, determinístico) → pega teste que não exercita a entrega
+            agregado + por módulo                        → e o módulo que a média esconde
 Camada 5 — Revisor LLM          (caro, automático)       → pega o que passa nos testes
 Camada 6 — Gate humano          (manual)                 → segura ação irreversível
 Transversal — Checkpoints SQLite + circuit breakers + parsers tolerantes
@@ -369,3 +450,9 @@ Uma camada só serve para o que ela consegue ver. Os itens 15 e 16 mostram o
 custo de confiar em sinal ambíguo — exit code que mente, invocação que muda o
 `sys.path`: guarda que aprova o que deveria barrar desloca a falha para longe
 da causa, e é justamente onde o depurador não vai procurar.
+
+E os itens 17–19 mostram que **defesa se dimensiona com o trabalho**: as
+mesmas camadas que aprovaram um healthcheck em uma rodada deixaram passar uma
+API sem testes de endpoint, porque mediam o agregado e enxergavam metade da
+suíte. O pedido complexo não quebrou o pipeline — ele revelou onde as réguas
+tinham sido calibradas para um arquivo só.

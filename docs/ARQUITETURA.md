@@ -105,9 +105,10 @@ sequenceDiagram
 5. **Separação entre implementar e validar**: quem escreve o código não
    escreve os testes — o executor é proibido de tocar em `tests/`.
 6. **Quem vigia os testes**: verdes não provam correção se a suíte for fraca.
-   Duas checagens complementares — o **guard de critérios** (semântico, antes
-   de executar) e a **cobertura** (determinística, depois de executar) —
-   devolvem ao QA num laço curto, sem pagar outra rodada de desenvolvimento.
+   O **guard de critérios** (semântico, antes de executar) e a **cobertura**
+   (determinística, depois) devolvem ao QA num laço curto, sem pagar outra
+   rodada de desenvolvimento. A cobertura tem dois pisos — agregado e **por
+   módulo** —, porque a média esconde justamente o arquivo central do pedido.
 7. **Jaula de execução**: código gerado por LLM roda em container efêmero,
    com a entrega montada read-only, sem rede e com limites de recursos —
    `.squad/out` é a única superfície de escrita (relatório de cobertura).

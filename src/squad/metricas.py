@@ -99,6 +99,12 @@ def resumo(thread_id: str) -> str:
             for e in testes
         )
         linhas.append(f"  Execuções de teste          : {historico}")
+        ultimo = testes[-1]
+        if ultimo.get("cobertura_pior_arquivo"):
+            linhas.append(
+                f"  Módulo menos coberto        : "
+                f"{ultimo['cobertura_pior_arquivo']} ({ultimo.get('cobertura_pior', 0)}%)"
+            )
     guardas = _dos("validacao_testes")
     if guardas:
         linhas.append(

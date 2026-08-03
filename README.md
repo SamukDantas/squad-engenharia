@@ -116,9 +116,10 @@ Para publicar as entregas aprovadas, configure `DEPLOY_REPO=owner/repo` no
 - Não há fallback silencioso do sandbox para o host: sem Docker, o nó falha
   alto e nomeia as saídas. Perder a jaula justamente quando ela falha é o
   pior momento para rodar código não confiável na máquina.
-- Testes verdes não bastam: um **guard de critérios** (antes de executar) e um
-  **piso de cobertura** (depois) devolvem suítes fracas ao QA — num laço curto,
-  sem pagar outra rodada de desenvolvimento.
+- Testes verdes não bastam: um **guard de critérios** (antes de executar) e
+  **dois pisos de cobertura** — agregado e por módulo — devolvem suítes fracas
+  ao QA num laço curto, sem pagar outra rodada de desenvolvimento. O piso por
+  módulo existe porque a média esconde o arquivo central do pedido.
 - Cada execução grava `metrics/<thread_id>.json` com duração e veredito por nó,
   e imprime o resumo ao final — é o que permite comparar duas execuções.
 - O deploy é real: após o gate humano, a entrega é commitada e publicada na
