@@ -16,13 +16,13 @@ sequenceDiagram
     actor U as Usuário
     participant G as Grafo LangGraph
     participant CK as Checkpointer SQLite
-    participant P as Crew Planejamento<br/>(analista → arquiteto)
-    participant V as Guard de Aderência<br/>(chamada única LLM)
-    participant D as Crew Desenvolvimento<br/>(backend → integração → tech lead)
-    participant T as Crew Testes<br/>(QA escreve pytest)
-    participant WS as Workspace<br/>workspace/&lt;thread_id&gt;/
-    participant PT as pytest<br/>(subprocess, timeout 120s)
-    participant R as Crew Revisão<br/>(revisor LLM)
+    participant P as Crew Planejamento (analista → arquiteto)
+    participant V as Guard de Aderência (chamada única LLM)
+    participant D as Crew Desenvolvimento (backend → integração → tech lead)
+    participant T as Crew Testes (QA escreve pytest)
+    participant WS as Workspace (workspace/thread_id)
+    participant PT as pytest (subprocess, timeout 120s)
+    participant R as Crew Revisão (revisor LLM)
     participant DP as Deploy
 
     U->>G: python main.py "pedido"
@@ -38,13 +38,13 @@ sequenceDiagram
             V-->>G: SIM → segue
         else spec incoerente
             V-->>G: NAO → replaneja
-            Note over G: 3ª falha: RuntimeError<br/>(interrompe com erro explícito)
+            Note over G: 3ª falha: RuntimeError (interrompe com erro explícito)
         end
     end
 
     loop máx. 3 tentativas de correção
         G->>D: kickoff(spec, feedback_qa)
-        D->>WS: escreve arquivos .py REAIS<br/>(ferramentas confinadas ao workspace)
+        D->>WS: escreve arquivos .py REAIS (ferramentas confinadas ao workspace)
         G->>WS: varre o disco: manifesto + dump do código
         G->>CK: salva checkpoint
         G->>T: kickoff(spec, arquivos)
@@ -52,26 +52,26 @@ sequenceDiagram
         G->>PT: executa pytest no workspace (nó sem LLM)
         PT-->>G: exit code + saída real
         G->>CK: salva checkpoint
-        alt exit ≠ 0 (falha, "nenhum teste coletado" ou timeout)
-            Note over G,D: feedback_qa = stack trace real do pytest<br/>volta ao desenvolvimento<br/>(3ª tentativa: circuit breaker → gate humano)
+        alt exit ≠ 0 (falha, nenhum teste coletado ou timeout)
+            Note over G,D: feedback_qa = stack trace real do pytest<br/>volta ao desenvolvimento (3ª tentativa: circuit breaker → gate humano)
         else exit 0 (testes verdes)
             G->>R: kickoff(codigo, spec, saida_testes)
             R-->>G: revisão + veredito APROVADO/REPROVADO
             alt APROVADO (verdes E aprovado)
                 Note over G: sai do laço → gate humano
             else REPROVADO
-                Note over G,D: feedback_qa = apontamentos da revisão<br/>volta ao desenvolvimento<br/>(3ª tentativa: circuit breaker → gate humano)
+                Note over G,D: feedback_qa = apontamentos da revisão<br/>volta ao desenvolvimento (3ª tentativa: circuit breaker → gate humano)
             end
         end
     end
 
-    G->>U: interrupt( ) "Autorizar deploy? (sim/nao)"
+    G->>U: interrupt( ) Autorizar deploy? (sim/nao)
     Note over G,CK: execução pausada e persistida —<br/>sobrevive a queda do processo
-    U->>G: "sim"
+    U->>G: sim
     G->>DP: executa deploy (nó determinístico — real na Fase 4)
     DP-->>G: deploy_ok = true
     G->>CK: checkpoint final
-    G-->>U: Deploy ok: True + entrega em workspace/&lt;thread_id&gt;/
+    G-->>U: Deploy ok: True + entrega em workspace/thread_id/
 ```
 
 ## Pontos estruturais
