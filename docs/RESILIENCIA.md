@@ -7,10 +7,12 @@ provedor. Os itens 1–10 vêm da squad em modo simulação; os itens 11–14
 apareceram na evolução para desenvolvimento real (Fases 1–5), quando os
 agentes ganharam disco, ferramentas e processos externos; os itens 15–16
 surgiram ao mover a execução dos testes para uma jaula Docker (Fase 6); os
-itens 17–19 vieram da primeira execução com um pedido **complexo** (API REST
-com persistência), que é quando as defesas dimensionadas para um arquivo
-encontraram um projeto de verdade; e os itens 20–21 vieram da execução
-seguinte, que mediu o efeito dessas correções — e encontrou os defeitos delas.
+itens 17–23 vieram das execuções com um pedido **complexo** (API REST com
+persistência), em três voltas do mesmo ciclo: rodar encontrou defeitos nas
+defesas calibradas para um arquivo (17–19); medir a correção encontrou os
+defeitos dela (20–21); e a correção seguinte encontrou os defeitos de si
+mesma (22–23). O padrão é o próprio método — cada volta só apareceu porque a
+anterior foi executada e observada, não argumentada.
 
 ---
 
@@ -494,6 +496,43 @@ tempo e esconde a causa, tanto quanto desistir de um 503 desperdiça trabalho
 já feito. A classificação é o coração do mecanismo — um retry que repete tudo
 é quase tão ruim quanto não ter retry.
 
+*Continua no item 23: a primeira versão desta defesa classificou por sintoma
+e piorou o caso que motivou sua criação.*
+
+---
+
+## 23. O retry que triplicou o custo da falha
+
+**Sintoma:** com o retry do item 22 ativo, o nó de escrita de testes falhou em
+**2.694 segundos** (45 min, 3 tentativas) — contra 844 segundos (14 min) da
+mesma falha sem retry. As três tentativas terminaram no mesmo erro.
+
+**Causa raiz:** dois erros de julgamento na mesma linha de código.
+
+1. **Classificação por sintoma, não por causa.** O `TypeError: 'NoneType'
+   object is not subscriptable` aparecia em dois fenômenos distintos: um
+   soluço real do provedor (chamada de 27s, que se recuperou) e a
+   **saturação de contexto** do item 5 — o modelo estoura e devolve vazio,
+   o CrewAI quebra ao acessar. Saturação é determinística: o contexto não
+   encolhe entre tentativas, então repetir só troca um erro rápido por um
+   erro lento.
+2. **Retry sem noção de custo.** Repetir um guard de 20s é barato; repetir um
+   kickoff de crew de 800s custa mais que a própria falha. O mesmo mecanismo
+   que protegia um caso arruinava o outro.
+
+**Solução:** classificar saturação (`invalid response from llm`, `none or
+empty`) como **permanente**, com mensagem que nomeia a causa e aponta a saída
+(reduzir artefatos ou trocar de modelo); e `caro=True` nos kickoffs de crew,
+que passam a ter uma única tentativa. Guards curtos mantêm as três.
+
+**Princípio:** classificar falha pelo **texto do sintoma** é frágil quando
+causas diferentes produzem o mesmo sintoma — e aqui o sintoma era idêntico
+para um problema efêmero e um determinístico. Toda política de repetição
+precisa responder duas perguntas, não uma: *isso pode melhorar sozinho?* e
+*quanto custa descobrir que não?* Sem a segunda, a defesa vira amplificador
+de custo — e o item 20 já tinha avisado que métrica nova precisa de
+regressão nos dois sentidos.
+
 ---
 
 ## Resumo da arquitetura de defesa em camadas
@@ -511,10 +550,11 @@ Transversal — Checkpoints SQLite + circuit breakers + parsers tolerantes
             + métricas por execução + retry de falha transitória
 ```
 
-Resiliência em três escalas de tempo, cada uma para uma duração de falha:
+Resiliência em três escalas de tempo, cada uma para uma duração de falha —
+e cada uma barata o suficiente para o que protege (itens 22 e 23):
 
 ```
-Soluço da chamada   → retry com backoff        (segundos)
+Soluço da chamada   → retry com backoff        (segundos, só em chamada barata)
 Queda do processo   → checkpoints SQLite       (retomada por --thread)
 Laço improdutivo    → circuit breakers         (rodadas)
 ```
