@@ -253,6 +253,7 @@ def no_planejamento(state: EstadoProjeto, config: RunnableConfig) -> EstadoProje
         resultado = com_retry(
             "planejamento",
             lambda: crew_planejamento().kickoff(inputs={"pedido": state["pedido"]}),
+            caro=True,
         )
     return {
         "spec": resultado.raw,
@@ -319,7 +320,7 @@ def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
                 "arquivos": "\n".join(state.get("arquivos", [])) or "(workspace vazio)",
                 "feedback_qa": state.get("feedback_qa", "") or "Nenhum — primeira rodada.",
             }
-        ))
+        ), caro=True)
     # Revarre o workspace: os testes agora fazem parte da entrega e entram
     # no dump que o revisor recebe.
     arquivos = _arquivos_do_workspace(state["workspace"])
@@ -375,7 +376,7 @@ def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
                 "spec": state["spec"],
                 "saida_testes": state.get("saida_testes", ""),
             }
-        ))
+        ), caro=True)
         texto = resultado.raw
         aprovado = "APROVADO" in texto.upper().splitlines()[-1] if texto else False
         m.update(aprovado=aprovado)

@@ -107,6 +107,30 @@ impresso ao final: rodadas de desenvolvimento e de reescrita de testes,
 histórico de verde/vermelho e cobertura por rodada, vereditos dos guards e
 da revisão, nós mais lentos e onde a entrega foi publicada.
 
+## O que o primeiro pedido complexo ensinou
+
+As sete fases foram validadas com um pedido que cabia em um arquivo. A
+primeira execução com um projeto de verdade — API REST com CRUD, SQLite,
+filtro e paginação — mostrou que **defesa se dimensiona com o trabalho**:
+
+- a cobertura agregada de 89% escondia o módulo da API em 51%, sem nenhum
+  teste de endpoint (item 17);
+- o guard de critérios julgava vendo 48% da suíte (item 18);
+- o teto de desenvolvimento, calibrado na rodada mais barata, derrubava a
+  terceira (item 21);
+- e a defesa criada contra o soluço do provedor triplicou o custo de uma
+  falha determinística (item 23).
+
+Nenhum desses apareceu em dezenas de execuções do pedido simples. **Sistema
+de agentes se avalia no tamanho de trabalho que ele vai receber**, e o custo
+de descobrir isso tarde é proporcional ao tamanho.
+
+Uma conclusão de escopo, também: o pedido complexo **não converge com modelo
+gratuito**. Foram 138 minutos, três interrupções e nenhuma entrega aprovada —
+o modelo satura de forma reprodutível ao escrever testes para um projeto
+multi-arquivo. O pipeline governa bem; o gargalo está na capacidade de quem
+raciocina dentro dele.
+
 ## O que NÃO muda
 
 A arquitetura validada permanece idêntica: grafo, laços com circuit breakers,
