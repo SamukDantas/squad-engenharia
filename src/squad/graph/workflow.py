@@ -73,6 +73,34 @@ def _veredito_sim(resposta: object) -> bool:
     )
 
 
+# Linhas finais examinadas em busca do veredito da revisão.
+LINHAS_VEREDITO = 8
+
+
+def _veredito_aprovado(texto: str) -> bool:
+    """Procura APROVADO/REPROVADO nas últimas linhas, não só na última.
+
+    Exigir o token na última linha é acoplar roteamento ao formato exato da
+    saída (o que o item 7 do RESILIENCIA.md proíbe): um revisor que escreve
+    "**APROVADO**" e fecha com um parágrafo de conclusão tinha a aprovação
+    lida como reprova — custando uma rodada inteira do laço.
+
+    Vale o **último** veredito encontrado, porque o texto discute
+    apontamentos antes de concluir. Nada reconhecível conta como reprova.
+    """
+    if not texto:
+        return False
+    linhas = [ln for ln in texto.upper().splitlines() if ln.strip()]
+    for linha in reversed(linhas[-LINHAS_VEREDITO:]):
+        # REPROVADO primeiro: "APROVADO" não é substring dele, mas a ordem
+        # deixa a precedência explícita para quem lê.
+        if "REPROVADO" in linha:
+            return False
+        if "APROVADO" in linha:
+            return True
+    return False
+
+
 # ---------- helpers de workspace ----------
 
 # Diretórios de trabalho (caches de ferramentas e instruções da squad ao
@@ -378,7 +406,7 @@ def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
             }
         ), caro=True)
         texto = resultado.raw
-        aprovado = "APROVADO" in texto.upper().splitlines()[-1] if texto else False
+        aprovado = _veredito_aprovado(texto)
         m.update(aprovado=aprovado)
     return {
         "relatorio_qa": texto,

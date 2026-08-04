@@ -7,12 +7,14 @@ provedor. Os itens 1–10 vêm da squad em modo simulação; os itens 11–14
 apareceram na evolução para desenvolvimento real (Fases 1–5), quando os
 agentes ganharam disco, ferramentas e processos externos; os itens 15–16
 surgiram ao mover a execução dos testes para uma jaula Docker (Fase 6); os
-itens 17–23 vieram das execuções com um pedido **complexo** (API REST com
-persistência), em três voltas do mesmo ciclo: rodar encontrou defeitos nas
-defesas calibradas para um arquivo (17–19); medir a correção encontrou os
-defeitos dela (20–21); e a correção seguinte encontrou os defeitos de si
-mesma (22–23). O padrão é o próprio método — cada volta só apareceu porque a
-anterior foi executada e observada, não argumentada.
+itens 17–24 vieram das execuções com um pedido **complexo** (API REST com
+persistência), em voltas sucessivas do mesmo ciclo: rodar encontrou defeitos
+nas defesas calibradas para um arquivo (17–19); medir a correção encontrou os
+defeitos dela (20–21); a correção seguinte encontrou os defeitos de si mesma
+(22–23); e a primeira execução que produziu uma entrega boa revelou que o
+parser do veredito contrariava a lição que ele implementava (24). O padrão é o
+próprio método — cada volta só apareceu porque a anterior foi executada e
+observada, não argumentada.
 
 ---
 
@@ -532,6 +534,44 @@ precisa responder duas perguntas, não uma: *isso pode melhorar sozinho?* e
 *quanto custa descobrir que não?* Sem a segunda, a defesa vira amplificador
 de custo — e o item 20 já tinha avisado que métrica nova precisa de
 regressão nos dois sentidos.
+
+---
+
+## 24. A implementação que violou a própria lição
+
+**Sintoma:** execução com entrega boa — testes verdes, 100% de cobertura em
+todos os módulos, testes de endpoint reais — em que o revisor escreveu
+**APROVADO** e o grafo registrou `aprovado: False`, encaminhando o trabalho ao
+gate humano como reprovado.
+
+**Causa raiz:** o parser do veredito exigia o token na **última linha**:
+
+```python
+aprovado = "APROVADO" in texto.upper().splitlines()[-1]
+```
+
+O revisor concluiu com `**APROVADO**` e então fechou com um parágrafo
+("Nenhuma correção necessária. O código é legível..."). A última linha não
+continha o token, e a aprovação virou reprova. O item 7 deste documento diz
+para nunca acoplar roteamento condicional a formato exato de saída de LLM — e
+a implementação dele fazia exatamente isso, só que uma linha mais abaixo.
+
+**Solução:** procurar o veredito nas **últimas linhas** (8), valendo o último
+encontrado, com `REPROVADO` explicitamente antes de `APROVADO` na checagem e
+nada reconhecível contando como reprova. Verificado contra os textos reais das
+duas rodadas desta execução — a que aprovou e a que reprovou — mais seis
+formatos sintéticos.
+
+**Custo do defeito:** um falso REPROVADO gasta uma rodada inteira do laço —
+desenvolvimento, escrita de testes, guard, execução e revisão de novo. Nesta
+execução o teto já havia sido atingido, então nada foi desperdiçado; numa
+aprovação de primeira rodada, teriam sido dois ciclos completos.
+
+**Princípio:** a regra escrita e a regra implementada divergem com o tempo, e
+o lugar mais perigoso para essa divergência é dentro da própria defesa que a
+regra criou. Ao escrever um parser tolerante, teste-o contra **saídas reais do
+modelo**, não contra o formato que o prompt pediu — o prompt pede, o modelo
+decide.
 
 ---
 
