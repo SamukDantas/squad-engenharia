@@ -18,7 +18,18 @@ import shutil
 import subprocess
 from pathlib import Path
 
-TIMEOUT_OPENCODE = 900  # segundos; implementação completa é mais lenta que um teste
+def _timeout() -> int:
+    """Teto por rodada de desenvolvimento.
+
+    Medido em execução real: rodadas de ~500s numa API multi-arquivo, e a
+    terceira estourando os 900s originais — rodadas de correção ficam mais
+    caras conforme o código cresce e o feedback acumula. O teto existe contra
+    CLI travado, não contra trabalho legítimo demorado.
+    """
+    try:
+        return int(os.getenv("TIMEOUT_DESENVOLVIMENTO", "1800"))
+    except ValueError:
+        return 1800
 LIMITE_SAIDA = 4_000    # chars da saída ecoados no log
 
 LIBS_PERMITIDAS = "fastapi, flask, httpx, requests"
@@ -52,6 +63,8 @@ def _instrucoes(spec: str, feedback_qa: str) -> str:
         "- NÃO deixe arquivos de rastro na entrega (saída de comandos, logs, "
         "relatórios de teste). Se precisar salvar algo transitório, use o "
         "diretório `.squad/`.\n"
+        "- NÃO crie scripts para rodar os testes (`run_tests.py` e afins): a "
+        "suíte é executada pelo próprio pipeline.\n"
         "- Mantenha o escopo estritamente na especificação.\n\n"
         "## Especificação\n\n"
         f"{spec}\n"
@@ -93,11 +106,11 @@ def executar_opencode(workspace: str, spec: str, feedback_qa: str = "") -> str:
             # Sem stdin herdado: o CLI não pode consumir a entrada do processo
             # pai (a resposta do gate humano) nem travar esperando input.
             stdin=subprocess.DEVNULL,
-            timeout=TIMEOUT_OPENCODE,
+            timeout=_timeout(),
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(
-            f"OpenCode CLI excedeu {TIMEOUT_OPENCODE}s. Progresso salvo no "
+            f"OpenCode CLI excedeu {_timeout()}s. Progresso salvo no "
             "checkpoint: retome com --thread para reexecutar o desenvolvimento."
         )
 

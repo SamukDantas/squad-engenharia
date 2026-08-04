@@ -32,11 +32,22 @@ _PYTEST_ARGS = [
 
 # Sem omitir os próprios testes, eles inflam a cobertura: um arquivo de teste
 # executado é ~100% coberto, e a métrica passaria a medir a si mesma.
+#
+# Scripts de conveniência (um `run_tests.py` que o executor cria para chamar o
+# pytest) nunca são importados, ficam em 0% e sequestram o piso por módulo —
+# o QA seria mandado escrever testes para um runner de testes. A lista é
+# conservadora e por nome convencional; a defesa principal é a instrução ao
+# executor para não criar esses scripts.
 _COVERAGERC = """[run]
 omit =
     tests/*
     .squad/*
     */site-packages/*
+    run_tests.py
+    run.py
+    manage.py
+    setup.py
+    conftest.py
 """
 
 

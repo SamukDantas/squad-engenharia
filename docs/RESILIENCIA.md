@@ -9,7 +9,8 @@ agentes ganharam disco, ferramentas e processos externos; os itens 15–16
 surgiram ao mover a execução dos testes para uma jaula Docker (Fase 6); os
 itens 17–19 vieram da primeira execução com um pedido **complexo** (API REST
 com persistência), que é quando as defesas dimensionadas para um arquivo
-encontraram um projeto de verdade.
+encontraram um projeto de verdade; e os itens 20–21 vieram da execução
+seguinte, que mediu o efeito dessas correções — e encontrou os defeitos delas.
 
 ---
 
@@ -415,6 +416,54 @@ isso um nome arbitrário como `pywhere.txt` ainda passa. A prevenção no prompt
 **entrega** do que é **subproduto do trabalho** — e prefira prevenir na
 instrução a adivinhar por heurística depois, porque heurística sobre nome de
 arquivo erra nos dois sentidos.
+
+---
+
+## 20. A régua nova mediu a coisa errada: script auxiliar sequestrando o piso
+
+**Sintoma:** na execução seguinte à criação do piso por módulo (item 17), o
+"pior módulo" passou a ser `run_tests.py` com **0%** — um script de
+conveniência que o executor criou para chamar o pytest e que nenhum teste
+importa. Com testes verdes, o piso teria bloqueado a entrega mandando o QA
+escrever testes **para um runner de testes**.
+
+**Causa raiz:** a régua nova não distinguia *módulo de entrega sem teste* — o
+caso real que ela existe para pegar — de *script auxiliar naturalmente sem
+teste*. Ambos aparecem no `coverage.json` com o mesmo formato, e o script,
+nunca importado, marca 0% e ganha o pior lugar por construção.
+
+**Solução em duas camadas, a mesma forma do item 19:** instrução ao executor
+para não criar scripts de execução de testes (o pipeline já roda a suíte) e
+uma lista conservadora de nomes convencionais (`run_tests.py`, `manage.py`,
+`setup.py`…) no `omit` do coveragerc. Verificado nos dois sentidos: o falso
+positivo sumiu e o caso original (`routers/tasks.py` a 51,7%) continua sendo
+detectado.
+
+**Princípio:** toda métrica nova precisa de um teste de regressão nos **dois
+sentidos** — que ela pegue o caso que motivou sua criação e que não pegue o
+caso parecido que é legítimo. Uma defesa que dispara errado gasta rodadas
+caras perseguindo um problema que não existe, e ensina a equipe a ignorá-la.
+
+---
+
+## 21. Teto dimensionado para a primeira rodada
+
+**Sintoma:** a terceira rodada de desenvolvimento estourou os 900s do
+`TIMEOUT_OPENCODE` e derrubou a execução de um projeto multi-arquivo.
+
+**Causa raiz:** o teto foi calibrado observando a primeira rodada de um
+pedido simples. Mas rodadas de **correção** ficam progressivamente mais
+caras: o código cresce, o feedback acumula e o executor precisa ler o que já
+existe antes de mudar. Medido: 497s, 476s, e a terceira acima de 900s.
+
+**Solução:** teto configurável (`TIMEOUT_DESENVOLVIMENTO`, padrão 1800s). O
+propósito do teto é matar CLI travado, não trabalho legítimo demorado — e o
+checkpoint garante que estourar custa uma rodada, não a execução.
+
+**Princípio:** teto calibrado no caso mais barato vira falha do caso normal.
+Dimensione limites pelo **pior caso plausível** da operação, não pelo
+primeiro que você mediu — e prefira torná-los configuráveis a fixá-los na
+constante que pareceu razoável no dia.
 
 ---
 
