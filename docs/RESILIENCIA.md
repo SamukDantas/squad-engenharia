@@ -467,6 +467,35 @@ constante que pareceu razoável no dia.
 
 ---
 
+## 22. Soluço do provedor matando o nó inteiro
+
+**Sintoma:** três interrupções na mesma sequência de execuções complexas — um
+401 por saldo, e dois `TypeError: 'NoneType' object is not subscriptable`
+vindos de dentro do CrewAI/LiteLLM ao acessar uma resposta malformada do
+provedor. A pior delas derrubou o nó de escrita de testes **após 844
+segundos** de trabalho.
+
+**Causa raiz:** o grafo tinha defesa para laço semântico (circuit breakers) e
+para queda de processo (checkpoints), mas **nenhuma para o soluço de uma
+chamada**. E o checkpoint salva nós *concluídos*, não trabalho parcial dentro
+de um nó: com nós longos, a granularidade do checkpoint vira a unidade de
+perda.
+
+**Solução:** `com_retry` em volta de toda chamada de LLM dos nós — 3
+tentativas com espera dobrando (5s, 10s). A decisão de repetir é por
+**conteúdo do erro**, não por tipo: resposta malformada, 5xx, timeout e
+limite de taxa são repetidos; saldo zerado, credencial inválida e modelo
+incapaz (item 12) sobem na primeira ocorrência.
+
+**Princípio:** resiliência tem camadas por *duração da falha*, e faltava a
+mais curta. Repetir o que é transitório e **falhar rápido no que é
+permanente** são a mesma disciplina: insistir em credencial inválida gasta
+tempo e esconde a causa, tanto quanto desistir de um 503 desperdiça trabalho
+já feito. A classificação é o coração do mecanismo — um retry que repete tudo
+é quase tão ruim quanto não ter retry.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
@@ -479,7 +508,15 @@ Camada 5 — Revisor LLM          (caro, automático)       → pega o que passa
 Camada 6 — Gate humano          (manual)                 → segura ação irreversível
 Transversal — Checkpoints SQLite + circuit breakers + parsers tolerantes
             + confinamento de ferramentas ao workspace + sandbox sem rede
-            + métricas por execução
+            + métricas por execução + retry de falha transitória
+```
+
+Resiliência em três escalas de tempo, cada uma para uma duração de falha:
+
+```
+Soluço da chamada   → retry com backoff        (segundos)
+Queda do processo   → checkpoints SQLite       (retomada por --thread)
+Laço improdutivo    → circuit breakers         (rodadas)
 ```
 
 Cada camada pega uma classe de erro que as outras não pegam; nenhuma sozinha
