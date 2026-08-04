@@ -30,6 +30,7 @@ from ..deploy import executar_deploy
 from ..llm import zen_llm
 from ..metricas import medir
 from ..opencode import executar_opencode
+from ..resiliencia import com_retry
 from ..sandbox import executar_testes
 from .state import EstadoProjeto
 
@@ -249,7 +250,10 @@ def no_deploy(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
 
 def no_planejamento(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     with medir(_tid(config), "planejamento"):
-        resultado = crew_planejamento().kickoff(inputs={"pedido": state["pedido"]})
+        resultado = com_retry(
+            "planejamento",
+            lambda: crew_planejamento().kickoff(inputs={"pedido": state["pedido"]}),
+        )
     return {
         "spec": resultado.raw,
         "spec_tentativas": state.get("spec_tentativas", 0) + 1,
@@ -261,12 +265,12 @@ def no_validacao_spec(state: EstadoProjeto, config: RunnableConfig) -> EstadoPro
     produzida trata mesmo do pedido, antes de gastar tokens com desenvolvimento.
     Protege contra alucinação da crew de planejamento (spec de outro tema)."""
     with medir(_tid(config), "validacao_spec") as m:
-        veredito = zen_llm().call(
+        veredito = com_retry("guard de aderência", lambda: zen_llm().call(
             "Você é um verificador rigoroso. Responda APENAS com a palavra SIM ou "
             f'NAO. A especificação técnica abaixo trata do pedido "{state["pedido"]}"'
             " — mesmo assunto e mesmo escopo, sem substituí-lo por outro tema?\n\n"
             f"Especificação:\n{state['spec'][:8000]}"
-        )
+        ))
         coerente = _veredito_sim(veredito)
         m.update(spec_coerente=coerente)
     if not coerente:
@@ -309,13 +313,13 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
 
 def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     with medir(_tid(config), "escrever_testes"):
-        crew_testes(state["workspace"]).kickoff(
+        com_retry("escrita de testes", lambda: crew_testes(state["workspace"]).kickoff(
             inputs={
                 "spec": state["spec"],
                 "arquivos": "\n".join(state.get("arquivos", [])) or "(workspace vazio)",
                 "feedback_qa": state.get("feedback_qa", "") or "Nenhum — primeira rodada.",
             }
-        )
+        ))
     # Revarre o workspace: os testes agora fazem parte da entrega e entram
     # no dump que o revisor recebe.
     arquivos = _arquivos_do_workspace(state["workspace"])
@@ -337,14 +341,14 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
         return {"testes_aderentes": False}
 
     with medir(_tid(config), "validacao_testes") as m:
-        veredito = zen_llm().call(
+        veredito = com_retry("guard de critérios", lambda: zen_llm().call(
             "Você é um verificador rigoroso de testes. Responda APENAS com a "
             "palavra SIM ou NAO. Os testes abaixo verificam de fato os "
             "critérios de aceite da especificação — cobrindo o comportamento "
             "exigido, e não apenas asserções triviais ou detalhes irrelevantes?"
             f"\n\nEspecificação:\n{state['spec'][:6000]}"
             f"\n\nTestes:\n{testes}"
-        )
+        ))
         aderentes = _veredito_sim(veredito)
         m.update(testes_aderentes=aderentes)
 
@@ -365,13 +369,13 @@ def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """Revisor LLM: só roda com testes verdes (não paga revisão de código que
     nem passa). Cobre o que execução não pega."""
     with medir(_tid(config), "revisao") as m:
-        resultado = crew_revisao().kickoff(
+        resultado = com_retry("revisão", lambda: crew_revisao().kickoff(
             inputs={
                 "codigo": state["codigo"],
                 "spec": state["spec"],
                 "saida_testes": state.get("saida_testes", ""),
             }
-        )
+        ))
         texto = resultado.raw
         aprovado = "APROVADO" in texto.upper().splitlines()[-1] if texto else False
         m.update(aprovado=aprovado)
