@@ -575,6 +575,44 @@ decide.
 
 ---
 
+## 25. Nove horas paradas: a falha que nenhuma das três camadas pega
+
+**Sintoma:** execução iniciada às 13:08 encontrada às 22:08 ainda "rodando" —
+**nove horas** sem uma linha de log. O processo consumira 60 segundos de CPU
+no período (0,2%). O grafo tinha concluído triagem e planejamento e estava
+dentro do guard de aderência, esperando uma resposta HTTP que nunca chegou.
+
+**Causa raiz:** todo subprocesso do projeto tem teto de tempo — OpenCode
+1800s, pytest 120s, git 60s — mas as **chamadas de LLM não tinham nenhum**. E
+o mais instrutivo: nenhuma das três camadas de resiliência ajuda aqui, porque
+todas pressupõem que a chamada *retorna*:
+
+| Camada | Precisa de | Um travamento oferece |
+|---|---|---|
+| Retry (item 22) | uma exceção | nada — não há erro |
+| Checkpoint (item 6) | o processo morrer | nada — o processo está vivo |
+| Circuit breaker (item 8) | a rodada terminar | nada — a rodada não avança |
+
+Travamento não é uma quarta escala de tempo: é **duração infinita**, e por
+isso escapa de um conjunto de defesas que parecia completo.
+
+**Solução:** `timeout` por requisição (`TIMEOUT_LLM`, padrão 300s). Duas
+descobertas na medição, ambas registradas no código: o SDK por baixo repete
+internamente, então o tempo real até desistir é ~**5,5x** o teto (300s ≈ 27
+min); e `num_retries=0` **não** desliga isso — o CrewAI repassa kwargs ao SDK
+da OpenAI, que rejeita o parâmetro e quebra toda chamada. A mensagem do
+timeout (`Request timed out`) também precisou entrar em `_TRANSITORIAS`: a
+lista tinha `"timeout"`, que não casa com `"timed out"` — o item 23 batendo
+pela terceira vez.
+
+**Princípio:** um inventário de defesas dá sensação de cobertura que a
+realidade não confirma. Ao desenhar resiliência, pergunte de cada camada
+**o que ela precisa que aconteça para agir** — e procure a falha que não
+oferece nenhum desses gatilhos. Aqui, três camadas dependiam de um evento
+(exceção, morte do processo, fim da rodada) e o silêncio não produz nenhum.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
@@ -594,6 +632,7 @@ Resiliência em três escalas de tempo, cada uma para uma duração de falha —
 e cada uma barata o suficiente para o que protege (itens 22 e 23):
 
 ```
+Chamada travada     → timeout por requisição   (duração infinita — item 25)
 Soluço da chamada   → retry com backoff        (segundos, só em chamada barata)
 Queda do processo   → checkpoints SQLite       (retomada por --thread)
 Laço improdutivo    → circuit breakers         (rodadas)
