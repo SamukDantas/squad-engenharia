@@ -26,6 +26,7 @@ _TRANSITORIAS = (
     "not subscriptable",
     "connection",
     "timeout",
+    "timed out",   # a frase que o LiteLLM usa; "timeout" nao casa com ela
     "temporarily unavailable",
     "503",
     "502",

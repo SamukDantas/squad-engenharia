@@ -7,12 +7,14 @@ provedor. Os itens 1–10 vêm da squad em modo simulação; os itens 11–14
 apareceram na evolução para desenvolvimento real (Fases 1–5), quando os
 agentes ganharam disco, ferramentas e processos externos; os itens 15–16
 surgiram ao mover a execução dos testes para uma jaula Docker (Fase 6); os
-itens 17–23 vieram das execuções com um pedido **complexo** (API REST com
-persistência), em três voltas do mesmo ciclo: rodar encontrou defeitos nas
-defesas calibradas para um arquivo (17–19); medir a correção encontrou os
-defeitos dela (20–21); e a correção seguinte encontrou os defeitos de si
-mesma (22–23). O padrão é o próprio método — cada volta só apareceu porque a
-anterior foi executada e observada, não argumentada.
+itens 17–24 vieram das execuções com um pedido **complexo** (API REST com
+persistência), em voltas sucessivas do mesmo ciclo: rodar encontrou defeitos
+nas defesas calibradas para um arquivo (17–19); medir a correção encontrou os
+defeitos dela (20–21); a correção seguinte encontrou os defeitos de si mesma
+(22–23); e a primeira execução que produziu uma entrega boa revelou que o
+parser do veredito contrariava a lição que ele implementava (24). O padrão é o
+próprio método — cada volta só apareceu porque a anterior foi executada e
+observada, não argumentada.
 
 ---
 
@@ -535,6 +537,82 @@ regressão nos dois sentidos.
 
 ---
 
+## 24. A implementação que violou a própria lição
+
+**Sintoma:** execução com entrega boa — testes verdes, 100% de cobertura em
+todos os módulos, testes de endpoint reais — em que o revisor escreveu
+**APROVADO** e o grafo registrou `aprovado: False`, encaminhando o trabalho ao
+gate humano como reprovado.
+
+**Causa raiz:** o parser do veredito exigia o token na **última linha**:
+
+```python
+aprovado = "APROVADO" in texto.upper().splitlines()[-1]
+```
+
+O revisor concluiu com `**APROVADO**` e então fechou com um parágrafo
+("Nenhuma correção necessária. O código é legível..."). A última linha não
+continha o token, e a aprovação virou reprova. O item 7 deste documento diz
+para nunca acoplar roteamento condicional a formato exato de saída de LLM — e
+a implementação dele fazia exatamente isso, só que uma linha mais abaixo.
+
+**Solução:** procurar o veredito nas **últimas linhas** (8), valendo o último
+encontrado, com `REPROVADO` explicitamente antes de `APROVADO` na checagem e
+nada reconhecível contando como reprova. Verificado contra os textos reais das
+duas rodadas desta execução — a que aprovou e a que reprovou — mais seis
+formatos sintéticos.
+
+**Custo do defeito:** um falso REPROVADO gasta uma rodada inteira do laço —
+desenvolvimento, escrita de testes, guard, execução e revisão de novo. Nesta
+execução o teto já havia sido atingido, então nada foi desperdiçado; numa
+aprovação de primeira rodada, teriam sido dois ciclos completos.
+
+**Princípio:** a regra escrita e a regra implementada divergem com o tempo, e
+o lugar mais perigoso para essa divergência é dentro da própria defesa que a
+regra criou. Ao escrever um parser tolerante, teste-o contra **saídas reais do
+modelo**, não contra o formato que o prompt pediu — o prompt pede, o modelo
+decide.
+
+---
+
+## 25. Nove horas paradas: a falha que nenhuma das três camadas pega
+
+**Sintoma:** execução iniciada às 13:08 encontrada às 22:08 ainda "rodando" —
+**nove horas** sem uma linha de log. O processo consumira 60 segundos de CPU
+no período (0,2%). O grafo tinha concluído triagem e planejamento e estava
+dentro do guard de aderência, esperando uma resposta HTTP que nunca chegou.
+
+**Causa raiz:** todo subprocesso do projeto tem teto de tempo — OpenCode
+1800s, pytest 120s, git 60s — mas as **chamadas de LLM não tinham nenhum**. E
+o mais instrutivo: nenhuma das três camadas de resiliência ajuda aqui, porque
+todas pressupõem que a chamada *retorna*:
+
+| Camada | Precisa de | Um travamento oferece |
+|---|---|---|
+| Retry (item 22) | uma exceção | nada — não há erro |
+| Checkpoint (item 6) | o processo morrer | nada — o processo está vivo |
+| Circuit breaker (item 8) | a rodada terminar | nada — a rodada não avança |
+
+Travamento não é uma quarta escala de tempo: é **duração infinita**, e por
+isso escapa de um conjunto de defesas que parecia completo.
+
+**Solução:** `timeout` por requisição (`TIMEOUT_LLM`, padrão 300s). Duas
+descobertas na medição, ambas registradas no código: o SDK por baixo repete
+internamente, então o tempo real até desistir é ~**5,5x** o teto (300s ≈ 27
+min); e `num_retries=0` **não** desliga isso — o CrewAI repassa kwargs ao SDK
+da OpenAI, que rejeita o parâmetro e quebra toda chamada. A mensagem do
+timeout (`Request timed out`) também precisou entrar em `_TRANSITORIAS`: a
+lista tinha `"timeout"`, que não casa com `"timed out"` — o item 23 batendo
+pela terceira vez.
+
+**Princípio:** um inventário de defesas dá sensação de cobertura que a
+realidade não confirma. Ao desenhar resiliência, pergunte de cada camada
+**o que ela precisa que aconteça para agir** — e procure a falha que não
+oferece nenhum desses gatilhos. Aqui, três camadas dependiam de um evento
+(exceção, morte do processo, fim da rodada) e o silêncio não produz nenhum.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
@@ -554,6 +632,7 @@ Resiliência em três escalas de tempo, cada uma para uma duração de falha —
 e cada uma barata o suficiente para o que protege (itens 22 e 23):
 
 ```
+Chamada travada     → timeout por requisição   (duração infinita — item 25)
 Soluço da chamada   → retry com backoff        (segundos, só em chamada barata)
 Queda do processo   → checkpoints SQLite       (retomada por --thread)
 Laço improdutivo    → circuit breakers         (rodadas)
