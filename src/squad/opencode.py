@@ -32,6 +32,17 @@ def _timeout() -> int:
         return 1800
 LIMITE_SAIDA = 4_000    # chars da saída ecoados no log
 
+# Frases com que o CLI aborta a run e mesmo assim devolve exit 0 — a jaula do
+# próprio OpenCode barrando uma ferramenta (medido: o executor tentou escrever
+# em /tmp, que no Windows resolve para fora do workspace, e a run morreu antes
+# de criar qualquer arquivo da entrega). Exit code classifica o processo, não
+# o trabalho: sem isto o nó conclui "com sucesso" e a squad paga QA, guards e
+# pytest em cima de um workspace vazio (RESILIENCIA.md, itens 15 e 28).
+_ABORTOS_COM_EXIT_ZERO = (
+    "the user rejected permission to use this specific tool call",
+    "auto-rejecting",
+)
+
 LIBS_PERMITIDAS = "fastapi, flask, httpx, requests"
 
 # Diretório de trabalho da squad dentro do workspace: instruções para o
@@ -120,5 +131,20 @@ def executar_opencode(workspace: str, spec: str, feedback_qa: str = "") -> str:
             f"OpenCode CLI falhou (exit {r.returncode}):\n{saida[-LIMITE_SAIDA:]}"
         )
 
+    motivo = _aborto_silencioso(saida)
+    if motivo:
+        raise RuntimeError(
+            f"OpenCode CLI abortou com exit 0: {motivo!r} na saída. A permissão "
+            "negada mata a run antes da entrega — em modo headless não há quem "
+            "responda ao pedido. Verifique se o executor está tentando escrever "
+            "fora do workspace (ex.: /tmp, que no Windows resolve para outro "
+            f"volume).\n{saida[-LIMITE_SAIDA:]}"
+        )
+
     print(saida[-LIMITE_SAIDA:])
     return saida
+
+
+def _aborto_silencioso(saida: str) -> str | None:
+    baixa = saida.lower()
+    return next((f for f in _ABORTOS_COM_EXIT_ZERO if f in baixa), None)

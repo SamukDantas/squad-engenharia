@@ -701,11 +701,85 @@ consulta um LLM mais de uma vez sobre o mesmo artefato, o histórico da decisão
 é parte da entrada, não contexto opcional — a mesma lição do item 10, agora do
 lado de quem julga em vez de quem produz.
 
+**Medido depois** (`9e288cb8`, mesmo pedido, mesmo modelo `deepseek-v4-pro`,
+mesmo endpoint, mesma máquina — só o laço mudou):
+
+| | `896917be` (antes) | `9e288cb8` (depois) |
+|---|---|---|
+| planejamento | 204,0s | 94,1s |
+| desenvolvimento | 303,5s | 424,2s |
+| escrever_testes | 492,6s | 363,3s |
+| pytest | ✅ 98,5% | ✅ 100% |
+| revisão | ❌ reprovado | ✅ **aprovado** |
+| rodadas | 3, interrompida | **1, concluída** |
+| total | **39,4 min** | **17,3 min** |
+
+Com uma ressalva que importa mais que o número: **o roteamento seletivo não foi
+exercitado**. Ele só entra depois de uma reprovação de revisão, e não houve
+nenhuma. Quem produziu o corte foi o outro freio — o critério de bloqueante vs.
+sugestão. O relatório da revisão aprovada abre com "## Apontamentos bloqueantes
+— Nenhum." e segue com duas sugestões da mesma natureza das que, na execução
+anterior, custaram duas rodadas inteiras.
+
+Ou seja: nos dois casos o código estava bom desde a primeira rodada (pytest
+verde nas duas). O que mudou foi o que o revisor fez com isso. A economia do
+roteamento seletivo continua sendo projeção, não medição — só aparece numa
+execução com reprovação legítima. **Registrar o que a medição não provou é
+parte da medição**; o contrário é atribuir o ganho à mudança de que mais se
+gosta.
+
+---
+
+## 28. O nó que entregou nada e disse que deu certo
+
+**Sintoma:** duas execuções seguidas em que o nó de desenvolvimento concluiu
+normalmente com o **workspace vazio**, e a squad seguiu adiante como se
+houvesse entrega — 855s de QA, dois guards de critérios, um pytest e ainda
+outra rodada de desenvolvimento, tudo em cima de zero arquivo.
+
+Causas diferentes, sintoma idêntico:
+
+| Execução | O que o executor fez | Exit code |
+|---|---|---|
+| `748d0fe4` | tentou escrever em `/tmp` (no Windows, fora do workspace); a jaula do próprio CLI auto-rejeitou e a run abortou | **0** |
+| `9ae8cde0` | morreu em 22,5s com saldo insuficiente na conta do provedor | **0** |
+
+**Causa raiz:** o nó confiava no exit code de um processo externo como prova
+de trabalho feito. Exit code classifica **o processo**, não **o trabalho** — o
+CLI terminou de forma ordenada em ambos os casos, e "terminou bem" não é
+"produziu entrega". A varredura do disco já existia e já devolvia lista vazia;
+ninguém perguntava a ela. É o item 15 outra vez, agora do lado do executor em
+vez do guard.
+
+Pior: a falha era *silenciosa e cara*. Sem código, o QA escreveu testes para
+módulos inexistentes, o guard de critérios reprovou a suíte que não existia, o
+pytest ficou vermelho por não coletar nada — e cada camada interpretou o vazio
+como um problema da sua alçada, produzindo feedback plausível sobre a coisa
+errada.
+
+**Solução:** guard determinístico em `no_desenvolvimento`, depois da varredura:
+sem nenhum arquivo fora de `tests/`, o grafo **para com erro explícito** em vez
+de rotear de volta. Não há o que corrigir sem código, e a causa é sempre de
+configuração (modelo sem tool calling, credencial, permissão) — repetir a
+rodada só repete a falha (item 26). O checkpoint preserva tudo: `--thread`
+retoma quando a configuração estiver certa. Em `executar_opencode`, as frases
+com que o CLI aborta devolvendo 0 (`the user rejected permission...`,
+`auto-rejecting`) passam a levantar erro nomeando a causa, em vez de deixá-la
+para ser descoberta três nós adiante.
+
+**Princípio:** **sucesso de processo não é sucesso de trabalho.** Onde um nó
+delega a um executor externo, o veredito tem que vir do artefato — o disco —,
+nunca do código de saída de quem deveria tê-lo produzido. É a mesma regra que
+o projeto já aplica ao veredito dos testes (roteia por pytest, não por opinião)
+aplicada uma etapa antes: se a camada seguinte só faz sentido com entrega, a
+existência da entrega é pré-condição, não suposição.
+
 ---
 
 ## Resumo da arquitetura de defesa em camadas
 
 ```
+Camada 0 — Guard de entrega     (grátis, determinístico) → pega executor que não produziu nada
 Camada 1 — Guard de aderência   (barato, automático)     → pega tema errado
 Camada 2 — Guard de critérios   (barato, automático)     → pega suíte que não testa a spec
 Camada 3 — pytest na jaula      (barato, determinístico) → pega defeito que executa errado

@@ -136,6 +136,37 @@ def _arquivos_do_workspace(workspace: str) -> list[str]:
     )
 
 
+def _conferir_entrega(arquivos: list[str], workspace: str) -> None:
+    """Guard de entrega vazia: o nó de desenvolvimento não pode concluir sem
+    ter produzido nada.
+
+    O executor é externo e sinaliza sucesso pelo exit code, que classifica o
+    processo — não o trabalho. Medido duas vezes em execução real: o OpenCode
+    CLI abortou (permissão negada numa rodada, saldo insuficiente na outra),
+    saiu com 0, e a squad seguiu pagando 855s de QA, dois guards de critérios
+    e um pytest em cima de um workspace vazio, ainda entrando em outra rodada
+    de desenvolvimento.
+
+    Falha alto em vez de rotear de volta: não há o que corrigir sem código, e
+    a causa é sempre de configuração (modelo sem tool calling, credencial,
+    permissão) — repetir a mesma rodada só repete a mesma falha (item 26). O
+    checkpoint preserva o progresso: `main.py --thread <id>` retoma.
+
+    Arquivos em `tests/` não contam como entrega: são do QA, e o executor é
+    proibido de tocá-los.
+    """
+    if any(not a.startswith("tests/") for a in arquivos):
+        return
+    achado = f"apenas {len(arquivos)} arquivo(s) de teste" if arquivos else "nada"
+    raise RuntimeError(
+        f"O executor de desenvolvimento concluiu sem escrever a entrega: {achado} "
+        f"em {workspace}. Exit code 0 não prova trabalho feito — confira se o "
+        "modelo do executor suporta tool calling, se as credenciais têm saldo e "
+        "se a saída acima registra permissão negada. Nada a corrigir sem código: "
+        "o grafo para aqui em vez de pagar QA e pytest em cima do vazio."
+    )
+
+
 def _dump_codigo(workspace: str, arquivos: list[str]) -> str:
     """Concatena o conteúdo real dos arquivos (limitado) para injetar na
     tarefa do revisor — artefato que decide roteamento não pode depender só
@@ -343,6 +374,7 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     # O que vale é o que está no disco: o manifesto do estado vem de uma
     # varredura determinística do workspace, não do texto do executor.
     arquivos = _arquivos_do_workspace(state["workspace"])
+    _conferir_entrega(arquivos, state["workspace"])
     return {
         "arquivos": arquivos,
         "codigo": _dump_codigo(state["workspace"], arquivos),
