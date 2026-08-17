@@ -151,8 +151,17 @@ via API compatível com OpenAI (`https://opencode.ai/zen/v1`). Configure no `.en
 
 ```
 OPENCODE_API_KEY=sua-chave
+OPENCODE_BASE_URL=https://opencode.ai/zen/v1
 MODEL=openai/kimi-k2.7-code
 ```
+
+Para experimentar o fluxo sem gastar crédito, use um dos modelos gratuitos do
+catálogo (`openai/laguna-s-2.1-free`, `openai/deepseek-v4-flash-free`,
+`openai/mimo-v2.5-free`) e aponte também o executor de desenvolvimento para o
+gratuito com `OPENCODE_RUN_MODEL=opencode/laguna-s-2.1-free` — sem isso o
+OpenCode CLI usa o modelo padrão da conta, que costuma ser pago. Atenção ao
+endpoint: `/zen/go/v1` é a assinatura **Go**, que não serve modelos gratuitos e
+tem cota mensal própria; os gratuitos só existem em `/zen/v1`.
 
 Todos os agentes compartilham o mesmo LLM por padrão (`src/squad/llm.py`),
 mas você pode passar modelos diferentes por agente — ex.: um modelo de código
