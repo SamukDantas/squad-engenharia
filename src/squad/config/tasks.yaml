@@ -96,10 +96,32 @@ revisar:
     Os testes automatizados JÁ FORAM EXECUTADOS pelo pipeline e PASSARAM;
     a saída real do pytest está abaixo. Sua revisão cobre o que a execução
     não pega: legibilidade, segurança e aderência do código à spec.
-    Conclua com o veredito exato APROVADO ou REPROVADO na última linha,
-    listando as correções necessárias quando reprovar.
+
+    REPROVAR custa uma rodada inteira de desenvolvimento, então o veredito
+    tem um critério estreito. Só é BLOQUEANTE o apontamento que se encaixa em
+    um destes três casos: (a) defeito que quebra comportamento documentado na
+    spec ou no README da entrega, (b) falha de segurança explorável, (c)
+    violação direta de um requisito da spec. Todo o resto — preferência de
+    estilo, refatoração, hardening defensivo, tratamento de erro que a spec
+    não exige, melhoria "opcional" — vai numa seção final
+    "## Sugestões (não bloqueantes)" e NÃO afeta o veredito. Se você não tem
+    nenhum apontamento bloqueante, o veredito é APROVADO, mesmo que a lista
+    de sugestões seja longa.
+
+    A revisão da rodada anterior está abaixo. O código que você está lendo JÁ
+    incorpora as correções que ela exigiu: não peça para desfazê-las. Se você
+    discorda de uma decisão que já foi arbitrada ali, registre como sugestão
+    não bloqueante — nunca como motivo de reprova. Mandar reverter o que a
+    rodada anterior exigiu faz o código oscilar entre duas versões sem nunca
+    convergir.
+
+    Conclua com o veredito exato APROVADO ou REPROVADO na última linha. Ao
+    reprovar, liste antes do veredito apenas as correções bloqueantes.
+    Revisão da rodada anterior: {revisao_anterior}
     Saída do pytest: {saida_testes}
     Código (lido do workspace): {codigo}
     Spec: {spec}
-  expected_output: Revisão com apontamentos e veredito final APROVADO/REPROVADO.
+  expected_output: >
+    Revisão separando apontamentos bloqueantes de sugestões não bloqueantes,
+    com o veredito final APROVADO/REPROVADO na última linha.
   agent: revisor_codigo

@@ -37,8 +37,10 @@ from .state import EstadoProjeto
 MAX_TENTATIVAS = 3
 MAX_REPLANEJAMENTOS = 2
 MAX_TESTES = 2                # reescritas da suíte por rodada de desenvolvimento
+MAX_REVISOES = 2              # rodadas que a opinião do revisor pode custar
 LIMITE_DUMP_CODIGO = 15_000   # chars de código injetados na tarefa do revisor
 LIMITE_AMOSTRA_TESTES = 20_000  # chars da suíte mostrados ao guard de critérios
+LIMITE_REVISAO_ANTERIOR = 4_000  # chars do veredito anterior devolvidos ao revisor
 
 
 def _piso(variavel: str, padrao: float) -> float:
@@ -193,6 +195,8 @@ def no_triagem(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
         "pedido": pedido,
         "tentativas": 0,
         "testes_tentativas": 0,
+        "revisao_tentativas": 0,
+        "origem_feedback": "",
         "workspace": str(workspace.resolve()),
     }
 
@@ -245,7 +249,14 @@ def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         )
     else:
         feedback = ""
-    return {**resultado, "cobertura_ok": cobertura_ok, "feedback_qa": feedback}
+    return {
+        **resultado,
+        "cobertura_ok": cobertura_ok,
+        "feedback_qa": feedback,
+        # Rodada movida por execução: se voltar ao desenvolvimento, a suíte é
+        # reescrita (o veredito veio dela).
+        "origem_feedback": "testes" if feedback else "",
+    }
 
 
 def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
@@ -314,7 +325,8 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     mesma nos dois casos."""
     executor = os.getenv("DEV_EXECUTOR", "opencode").strip().lower()
     feedback = state.get("feedback_qa", "")
-    with medir(_tid(config), "desenvolvimento", executor=executor):
+    origem = state.get("origem_feedback") or "inicial"
+    with medir(_tid(config), "desenvolvimento", executor=executor, origem=origem):
         if executor == "opencode":
             executar_opencode(state["workspace"], state["spec"], feedback)
         elif executor == "crews":
@@ -396,13 +408,22 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
 
 def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """Revisor LLM: só roda com testes verdes (não paga revisão de código que
-    nem passa). Cobre o que execução não pega."""
+    nem passa). Cobre o que execução não pega.
+
+    Recebe o próprio veredito da rodada anterior. Sem essa memória o revisor
+    julga cada rodada do zero e manda desfazer o que ele mesmo exigiu antes —
+    o código oscila entre dois pólos e cada volta custa uma rodada inteira
+    (RESILIENCIA.md, item 27).
+    """
+    # Ainda é o relatório da rodada anterior: este nó só o sobrescreve ao retornar.
+    anterior = (state.get("relatorio_qa") or "")[:LIMITE_REVISAO_ANTERIOR]
     with medir(_tid(config), "revisao") as m:
         resultado = com_retry("revisão", lambda: crew_revisao().kickoff(
             inputs={
                 "codigo": state["codigo"],
                 "spec": state["spec"],
                 "saida_testes": state.get("saida_testes", ""),
+                "revisao_anterior": anterior or "Nenhuma — primeira revisão.",
             }
         ), caro=True)
         texto = resultado.raw
@@ -410,7 +431,10 @@ def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
         m.update(aprovado=aprovado)
     return {
         "relatorio_qa": texto,
+        "revisao_anterior": anterior,
         "aprovado": aprovado,
+        "revisao_tentativas": state.get("revisao_tentativas", 0) + (0 if aprovado else 1),
+        "origem_feedback": "" if aprovado else "revisao",
         "feedback_qa": "" if aprovado else (
             f"A revisão de código reprovou a entrega:\n{texto}"
         ),
@@ -429,6 +453,27 @@ def rota_pos_validacao_spec(state: EstadoProjeto) -> str:
             "evitar desperdício de tokens — revise o modelo ou o prompt."
         )
     return "planejamento"
+
+
+def rota_pos_desenvolvimento(state: EstadoProjeto) -> str:
+    """Roteamento seletivo: a rodada nascida de reprovação de revisão não
+    reescreve a suíte.
+
+    O código mudou, então os testes precisam *rodar* de novo — não ser
+    *escritos* de novo. `escrever_testes` é o nó mais caro do grafo (8 min
+    medidos), e repagá-lo por um apontamento de legibilidade foi metade do
+    custo da execução que motivou esta mudança. Ir direto ao pytest também
+    pula o guard de critérios, que julgaria uma suíte inalterada.
+
+    As redes já existentes cobrem o risco: se a correção quebrar a suíte, o
+    pytest fica vermelho e a rodada volta ao desenvolvimento com o stack
+    trace; se adicionar código sem teste, o piso de cobertura devolve ao QA.
+    """
+    tem_suite = any(a.startswith("tests/") for a in state.get("arquivos", []))
+    if state.get("origem_feedback") == "revisao" and tem_suite:
+        print(">>> Correção de revisão: suíte preservada, indo direto ao pytest.")
+        return "executar_testes"
+    return "escrever_testes"
 
 
 def rota_pos_validacao_testes(state: EstadoProjeto) -> str:
@@ -458,7 +503,20 @@ def rota_pos_testes(state: EstadoProjeto) -> str:
 
 
 def rota_pos_revisao(state: EstadoProjeto) -> str:
+    """Teto próprio para a opinião do revisor.
+
+    `tentativas` é orçamento compartilhado com falha de teste. Sem um teto
+    separado, o sinal caro e subjetivo (revisão) consome sozinho as rodadas
+    reservadas ao sinal barato e determinístico (pytest vermelho). Ao estourar,
+    o gate humano decide — com o relatório em mãos.
+    """
     if state.get("aprovado"):
+        return "aprovacao_humana"
+    if state.get("revisao_tentativas", 0) >= MAX_REVISOES:
+        print(
+            f">>> Revisão reprovou {MAX_REVISOES}x: teto de rodadas por opinião "
+            "atingido, levando ao gate humano."
+        )
         return "aprovacao_humana"
     if state["tentativas"] >= MAX_TENTATIVAS:
         return "aprovacao_humana"
@@ -485,7 +543,7 @@ def construir_grafo():
     g.add_edge("triagem", "planejamento")
     g.add_edge("planejamento", "validacao_spec")
     g.add_conditional_edges("validacao_spec", rota_pos_validacao_spec)
-    g.add_edge("desenvolvimento", "escrever_testes")
+    g.add_conditional_edges("desenvolvimento", rota_pos_desenvolvimento)
     g.add_edge("escrever_testes", "validacao_testes")
     g.add_conditional_edges("validacao_testes", rota_pos_validacao_testes)
     g.add_conditional_edges("executar_testes", rota_pos_testes)

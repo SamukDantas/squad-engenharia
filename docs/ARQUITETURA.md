@@ -49,6 +49,9 @@ sequenceDiagram
         D->>WS: escreve arquivos .py REAIS (não escreve em tests/)
         G->>WS: varre o disco: manifesto + dump do código
         G->>CK: salva checkpoint
+        opt rodada nascida de reprovação de revisão
+            Note over G,PT: roteamento seletivo: suíte preservada —<br/>vai direto ao pytest, sem reescrever testes nem repagar o guard
+        end
         loop máx. 2 reescritas da suíte
             G->>T: kickoff(spec, arquivos, feedback_qa)
             T->>WS: escreve testes reais em tests/
@@ -67,12 +70,12 @@ sequenceDiagram
         else verde, mas cobertura abaixo do mínimo
             Note over G,T: problema do teste, não do código<br/>QA reescreve a suíte sem nova rodada de desenvolvimento
         else verde e cobertura suficiente
-            G->>R: kickoff(codigo, spec, saida_testes)
-            R-->>G: revisão + veredito APROVADO/REPROVADO
+            G->>R: kickoff(codigo, spec, saida_testes, revisao_anterior)
+            R-->>G: bloqueantes + sugestões + veredito APROVADO/REPROVADO
             alt APROVADO (verdes E aprovado)
                 Note over G: sai do laço → gate humano
-            else REPROVADO
-                Note over G,D: feedback_qa = apontamentos da revisão<br/>volta ao desenvolvimento (3ª tentativa: circuit breaker → gate humano)
+            else REPROVADO (só apontamento bloqueante reprova)
+                Note over G,D: feedback_qa = apontamentos da revisão<br/>volta ao desenvolvimento e daí direto ao pytest<br/>(2ª reprova: teto de opinião → gate humano)
             end
         end
     end
@@ -109,15 +112,23 @@ sequenceDiagram
    (determinística, depois) devolvem ao QA num laço curto, sem pagar outra
    rodada de desenvolvimento. A cobertura tem dois pisos — agregado e **por
    módulo** —, porque a média esconde justamente o arquivo central do pedido.
-7. **Jaula de execução**: código gerado por LLM roda em container efêmero,
+7. **Roteamento seletivo por origem do feedback**: reprovação de revisão não
+   reescreve a suíte — volta ao desenvolvimento e segue direto ao pytest. O
+   código mudou, então os testes precisam *rodar* de novo, não ser *escritos*
+   de novo; `escrever_testes` é o nó mais caro do grafo. O revisor recebe o
+   próprio veredito anterior e só reprova por apontamento bloqueante, porque
+   sinal caro e subjetivo não pode comandar o laço (RESILIENCIA.md, item 27).
+8. **Jaula de execução**: código gerado por LLM roda em container efêmero,
    com a entrega montada read-only, sem rede e com limites de recursos —
    `.squad/out` é a única superfície de escrita (relatório de cobertura).
-8. **O grafo lê o disco**: manifesto de arquivos e dump de código vêm de
+9. **O grafo lê o disco**: manifesto de arquivos e dump de código vêm de
    varredura determinística do workspace, injetados nas tarefas que decidem
    roteamento (RESILIENCIA.md, item 10).
-9. **Circuit breakers**: 2 replanejamentos (depois erro explícito), 3
-   rodadas de correção (depois o gate humano decide) e 2 reescritas da
-   suíte (depois segue com o sinal fraco registrado no estado).
-10. **Métricas por execução**: cada nó registra duração e veredito em
-   `metrics/<thread_id>.json`, com resumo impresso ao final — sem isso não
-   há como saber se uma mudança melhorou o resultado.
+10. **Circuit breakers**: 2 replanejamentos (depois erro explícito), 3
+   rodadas de correção (depois o gate humano decide), 2 reescritas da
+   suíte (depois segue com o sinal fraco registrado no estado) e 2 rodadas
+   por reprovação de revisão (depois o gate humano decide).
+11. **Métricas por execução**: cada nó registra duração e veredito em
+   `metrics/<thread_id>.json` — incluindo a origem de cada rodada de
+   desenvolvimento (inicial, testes ou revisão) —, com resumo impresso ao
+   final. Sem isso não há como saber se uma mudança melhorou o resultado.

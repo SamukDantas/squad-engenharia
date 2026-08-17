@@ -19,8 +19,11 @@ class EstadoProjeto(TypedDict, total=False):
     cobertura_ok: bool   # passou nos dois pisos (agregado e por módulo)
     saida_testes: str    # saída real (stdout+stderr) do pytest
     relatorio_qa: str    # saída do revisor de código
+    revisao_anterior: str    # relatório da revisão anterior (memória entre rodadas)
     feedback_qa: str     # correções pedidas quando reprovado (stack trace ou revisão)
+    origem_feedback: str # quem motivou a rodada: "testes" | "revisao" | ""
     aprovado: bool       # veredito do revisor
     tentativas: int      # contador do laço de correções
+    revisao_tentativas: int  # contador só das reprovações de revisão
     deploy_ok: bool      # resultado do nó de deploy
     deploy_ref: str      # onde a entrega foi publicada (repo@branch ou commit local)
