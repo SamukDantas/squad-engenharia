@@ -38,6 +38,12 @@ _TRANSITORIAS = (
 # Falha permanente: repetir só gasta tempo e dinheiro. Credencial inválida,
 # saldo zerado e modelo inexistente não melhoram na segunda tentativa.
 _PERMANENTES = (
+    # Cota do período esgotada. Chega como 429, o mesmo status de "devagar aí"
+    # — mas um repete e o outro não: este só volta quando o ciclo vira.
+    # Precisa vir antes das transitórias, que casam "429" e "rate limit".
+    "usage limit reached",
+    "usagelimiterror",
+    "quota exceeded",
     "insufficient balance",
     "creditserror",
     "invalid api key",

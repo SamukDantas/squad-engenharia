@@ -613,6 +613,38 @@ oferece nenhum desses gatilhos. Aqui, três camadas dependiam de um evento
 
 ---
 
+## 26. Um status, dois significados opostos
+
+**Sintoma:** execução interrompida por cota mensal esgotada
+(`429 GoUsageLimitError — Monthly usage limit reached. Resets in 8 days.`), e
+o retry insistiu **três vezes** com backoff antes de desistir.
+
+**Causa raiz:** a lista de transitórias casava `"429"` e `"rate limit"`. Mas
+429 carrega dois significados opostos:
+
+| 429 significando | Natureza | Ação certa |
+|---|---|---|
+| "devagar aí, tente em 3s" | transitória | repetir com backoff |
+| "cota do mês acabou, volta em 8 dias" | **permanente** | falhar na hora |
+
+O status HTTP é o mesmo; só o corpo distingue. Classificar pelo código dava o
+veredito errado para metade dos casos.
+
+**Solução:** `usage limit reached`, `usagelimiterror` e `quota exceeded` em
+`_PERMANENTES`, **antes** das transitórias na ordem de checagem — como a
+função testa permanentes primeiro, a frase específica vence o `"429"`
+genérico. Verificado nos dois sentidos: cota esgotada falha em 1 tentativa,
+rate limit real continua sendo repetido.
+
+**Princípio:** código de status classifica o *transporte*, não a *causa*. Onde
+o mesmo código cobre condições com respostas opostas — repetir versus desistir
+—, a decisão tem que olhar o corpo. É a terceira vez que este documento
+registra a mesma lição (itens 23 e 25): classificar por conteúdo só funciona
+se o conteúdo real de cada provedor estiver na lista, e cada provedor novo
+traz frases novas.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
