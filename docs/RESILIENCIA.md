@@ -645,6 +645,64 @@ traz frases novas.
 
 ---
 
+## 27. O revisor sem memória oscila o código entre dois pólos
+
+**Sintoma:** execução abandonada pelo custo. Três rodadas do laço, ~39 min de
+nós, para uma API de tarefas cujo **pytest ficou verde na rodada 1** — tudo
+que veio depois foi opinião do revisor.
+
+| Nó | Rodada 1 | Rodada 2 | Rodada 3 |
+|---|---|---|---|
+| desenvolvimento | 303s | 347s | 375s |
+| **escrever_testes** | **493s** | **381s** | interrompido |
+| validacao_testes | 46s | 20s | — |
+| pytest (docker) | 3,5s ✅ | 3,2s ✅ | — |
+| revisao | 105s ❌ | 77s ❌ | — |
+
+**Causa raiz:** três defeitos que só aparecem juntos.
+
+O primeiro é de roteamento: reprovação de revisão voltava ao desenvolvimento e
+caía na aresta estática para `escrever_testes`. A suíte inteira era reescrita —
+o nó mais caro do grafo — por um apontamento sobre inicialização do Flask, que
+não tinha relação nenhuma com os testes.
+
+O segundo é de critério: o revisor reprovava listando itens que ele próprio
+marcava como "opcional" e "estilístico". Não havia distinção entre bloqueante e
+sugestão, então preferência de estilo custava uma rodada de desenvolvimento.
+
+O terceiro é o que impedia a convergência. O revisor julga cada rodada do zero,
+sem ver o próprio veredito anterior:
+
+| Rodada | Apontamento | Efeito |
+|---|---|---|
+| 1 | "`init_db()` executado no import de `app.py`" | dev tira a inicialização do import |
+| 2 | "o app global não inicializa o banco" (o oposto) | dev devolve a inicialização |
+| 3 | código volta a `app = create_app()` no módulo | **reimplementou o que a rodada 1 reprovou** |
+
+Duas rodadas caras para voltar ao ponto de partida. Não é indecisão do modelo:
+cada revisão está certa isoladamente, porque o trade-off tem dois lados
+defensáveis e nada no laço registra qual deles já foi arbitrado.
+
+**Solução:** roteamento seletivo — rodada nascida de reprovação de revisão vai
+do desenvolvimento **direto ao pytest**, sem reescrever a suíte nem repagar o
+guard de critérios (o código mudou; os testes precisam *rodar* de novo, não ser
+*escritos* de novo). Mais três freios: veredito bloqueante restrito a defeito
+documentado, falha de segurança ou violação da spec, com o resto numa seção não
+bloqueante; o veredito anterior devolvido ao revisor, proibido de mandar
+desfazer o que exigiu antes; e `MAX_REVISOES = 2`, teto próprio para as rodadas
+que a opinião pode custar. As redes que tornam o atalho seguro já existiam:
+correção que quebra a suíte deixa o pytest vermelho, correção que adiciona
+código sem teste cai no piso de cobertura.
+
+**Princípio:** sinal caro e subjetivo não pode ter o mesmo poder de roteamento
+que sinal barato e determinístico — nem o mesmo orçamento de rodadas. E um
+juiz sem memória do próprio veredito não converge: **oscila**. Onde um laço
+consulta um LLM mais de uma vez sobre o mesmo artefato, o histórico da decisão
+é parte da entrada, não contexto opcional — a mesma lição do item 10, agora do
+lado de quem julga em vez de quem produz.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
@@ -654,6 +712,7 @@ Camada 3 — pytest na jaula      (barato, determinístico) → pega defeito que
 Camada 4 — Piso de cobertura    (barato, determinístico) → pega teste que não exercita a entrega
             agregado + por módulo                        → e o módulo que a média esconde
 Camada 5 — Revisor LLM          (caro, automático)       → pega o que passa nos testes
+            só bloqueante reprova, com memória do veredito anterior
 Camada 6 — Gate humano          (manual)                 → segura ação irreversível
 Transversal — Checkpoints SQLite + circuit breakers + parsers tolerantes
             + confinamento de ferramentas ao workspace + sandbox sem rede
@@ -693,3 +752,10 @@ mesmas camadas que aprovaram um healthcheck em uma rodada deixaram passar uma
 API sem testes de endpoint, porque mediam o agregado e enxergavam metade da
 suíte. O pedido complexo não quebrou o pipeline — ele revelou onde as réguas
 tinham sido calibradas para um arquivo só.
+
+O item 27 fecha o outro lado da mesma conta: **camada também tem custo, e o
+custo precisa ser proporcional ao valor do sinal**. O revisor LLM é a camada
+mais cara e a única subjetiva, e mesmo assim tinha o poder de mandar reescrever
+a suíte inteira e de consumir sozinho o orçamento de rodadas reservado ao
+pytest. Não adianta a régua estar certa se acioná-la custa mais do que o
+defeito que ela pega.

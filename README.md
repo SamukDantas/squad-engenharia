@@ -8,7 +8,7 @@ usando **LangGraph** como orquestrador (estado, checkpoints, gates humanos) e
 
 ```
 Triagem → Crew planejamento → Guard de aderência → Crew desenvolvimento → Crew testes → pytest → Crew revisão → Aprovação humana → Deploy
-              ↑____↻ spec incoerente (máx. 2)_|      ↑____________↻ testes vermelhos / revisão reprovada (máx. 3)____↻_|
+              ↑____↻ spec incoerente (máx. 2)_|      ↑_______↻ testes vermelhos (máx. 3) / revisão reprovada (máx. 2)____↻_|
 ```
 
 Princípio central: **vereditos vêm de execução, não de opinião**. O executor
@@ -120,13 +120,23 @@ Para publicar as entregas aprovadas, configure `DEPLOY_REPO=owner/repo` no
   **dois pisos de cobertura** — agregado e por módulo — devolvem suítes fracas
   ao QA num laço curto, sem pagar outra rodada de desenvolvimento. O piso por
   módulo existe porque a média esconde o arquivo central do pedido.
+- Reprovação de revisão **não repaga a suíte**: a rodada volta ao
+  desenvolvimento e segue direto ao pytest, porque o código mudou mas os testes
+  não. Escrever a suíte é o nó mais caro do grafo, e reescrevê-la por um
+  apontamento de legibilidade consumia metade da execução.
+- O revisor só reprova por apontamento **bloqueante** (defeito documentado,
+  falha de segurança, violação da spec) e recebe o próprio veredito da rodada
+  anterior — sem essa memória ele manda desfazer o que exigiu antes, e o código
+  oscila entre duas versões sem convergir.
 - Cada execução grava `metrics/<thread_id>.json` com duração e veredito por nó,
   e imprime o resumo ao final — é o que permite comparar duas execuções.
 - O deploy é real: após o gate humano, a entrega é commitada e publicada na
   branch `entrega/<thread_id>` do repo configurado em `DEPLOY_REPO` (sem a
   variável, commit local no workspace apenas).
-- O laço de correções tem limite de 3 tentativas — ao estourar, o gate humano
-  decide o que fazer com o trabalho reprovado.
+- O laço de correções tem limite de 3 tentativas, das quais no máximo 2 podem
+  ser gastas por reprovação de revisão — ao estourar qualquer um dos dois, o
+  gate humano decide o que fazer com o trabalho reprovado. O orçamento do sinal
+  determinístico (pytest) não é consumido pelo sinal subjetivo (revisor).
 - As ferramentas de arquivo são customizadas e **confinadas ao workspace**
   (caminho absoluto ou `..` que escape é recusado) — a jaula mínima sem Docker.
 - Checkpointer padrão é SQLite (`checkpoints.sqlite`), com fallback para
