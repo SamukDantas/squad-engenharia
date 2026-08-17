@@ -701,6 +701,33 @@ consulta um LLM mais de uma vez sobre o mesmo artefato, o histórico da decisão
 é parte da entrada, não contexto opcional — a mesma lição do item 10, agora do
 lado de quem julga em vez de quem produz.
 
+**Medido depois** (`9e288cb8`, mesmo pedido, mesmo modelo `deepseek-v4-pro`,
+mesmo endpoint, mesma máquina — só o laço mudou):
+
+| | `896917be` (antes) | `9e288cb8` (depois) |
+|---|---|---|
+| planejamento | 204,0s | 94,1s |
+| desenvolvimento | 303,5s | 424,2s |
+| escrever_testes | 492,6s | 363,3s |
+| pytest | ✅ 98,5% | ✅ 100% |
+| revisão | ❌ reprovado | ✅ **aprovado** |
+| rodadas | 3, interrompida | **1, concluída** |
+| total | **39,4 min** | **17,3 min** |
+
+Com uma ressalva que importa mais que o número: **o roteamento seletivo não foi
+exercitado**. Ele só entra depois de uma reprovação de revisão, e não houve
+nenhuma. Quem produziu o corte foi o outro freio — o critério de bloqueante vs.
+sugestão. O relatório da revisão aprovada abre com "## Apontamentos bloqueantes
+— Nenhum." e segue com duas sugestões da mesma natureza das que, na execução
+anterior, custaram duas rodadas inteiras.
+
+Ou seja: nos dois casos o código estava bom desde a primeira rodada (pytest
+verde nas duas). O que mudou foi o que o revisor fez com isso. A economia do
+roteamento seletivo continua sendo projeção, não medição — só aparece numa
+execução com reprovação legítima. **Registrar o que a medição não provou é
+parte da medição**; o contrário é atribuir o ganho à mudança de que mais se
+gosta.
+
 ---
 
 ## 28. O nó que entregou nada e disse que deu certo
