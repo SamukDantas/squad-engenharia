@@ -151,8 +151,28 @@ via API compatível com OpenAI (`https://opencode.ai/zen/v1`). Configure no `.en
 
 ```
 OPENCODE_API_KEY=sua-chave
+OPENCODE_BASE_URL=https://opencode.ai/zen/v1
 MODEL=openai/kimi-k2.7-code
 ```
+
+São **três** superfícies de modelo independentes, e o requisito de cada uma vem
+do que ela precisa fazer:
+
+| Variável | Quem usa | Precisa de tool calling? |
+|---|---|---|
+| `MODEL` | guards, planejamento, revisão | não — cabe modelo gratuito |
+| `MODEL_FERRAMENTAS` | QA que escreve os testes | **sim** |
+| `OPENCODE_RUN_MODEL` | OpenCode CLI no desenvolvimento | **sim** |
+
+Para experimentar o fluxo gastando pouco, ponha um gratuito em `MODEL`
+(`openai/laguna-s-2.1-free`, `openai/deepseek-v4-flash-free`,
+`openai/mimo-v2.5-free`) e mantenha as duas superfícies que escrevem em disco
+num modelo com tool calling. Gratuito que não sustenta ferramenta não falha
+alto: ele devolve o código como markdown na resposta e o nó conclui com o
+workspace vazio (item 12 do RESILIENCIA.md).
+
+Atenção ao endpoint: `/zen/go/v1` é a assinatura **Go**, que não serve modelos
+gratuitos e tem cota mensal própria; os gratuitos só existem em `/zen/v1`.
 
 Todos os agentes compartilham o mesmo LLM por padrão (`src/squad/llm.py`),
 mas você pode passar modelos diferentes por agente — ex.: um modelo de código
