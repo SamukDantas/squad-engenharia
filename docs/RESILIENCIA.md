@@ -776,6 +776,55 @@ existência da entrega é pré-condição, não suposição.
 
 ---
 
+## 29. O teto que cortava a metade que interessava
+
+**Sintoma:** nenhum — e esse é o ponto. A saída do pytest era guardada no
+estado por `saida[-8000:]`, corte cego pela cauda, sem aviso de que houve
+corte. Descoberto ao avaliar a adoção de um compressor externo, não por
+falha observada.
+
+**Medição** (18 amostras de `saida_testes` nos checkpoints, e reexecução do
+pytest nos workspaces reais para recuperar o bruto que o estado não guarda):
+
+| | |
+|---|---|
+| amostras abaixo do teto | 16 de 18 (310 a 2.438 chars — suítes verdes) |
+| amostras no teto de 8.000 | 2 |
+| maior saída bruta real | **19.422 chars** |
+| descartado pela cauda | **11.422 chars (59%)** |
+| linhas de falha distintas | 21 |
+| linhas de falha que chegavam ao dev | **19** |
+
+**Causa raiz:** o teto foi dimensionado para suíte verde, que gasta 300–2.400
+chars. Suíte vermelha e verbosa gasta uma ordem de grandeza a mais — e é
+exatamente o caso em que o texto deixa de ser registro e vira **instrução de
+conserto**. O corte pela cauda preserva o rodapé (`FAILED ...`) e joga fora a
+seção de tracebacks, onde está a causa. É o item 21 outra vez: régua calibrada
+na primeira rodada, que arrebenta quando o trabalho cresce.
+
+**Solução:** teto para 20.000, cobrindo o maior caso observado com folga. Não
+foi eliminado: contexto gigante satura o modelo e devolve resposta vazia
+(item 5), então o limite continua sendo uma defesa — só que dimensionada pelo
+que a execução realmente produz. O custo é ~3.200 tokens a mais, e só em
+rodada vermelha; o dump de código que o revisor recebe em *toda* revisão já
+custa mais que isso.
+
+Considerada e **descartada**: comprimir a saída (por ferramenta externa ou
+compressor próprio). Um compressor determinístico trivial reduz esses 19.422
+chars a 6.215 preservando as 21 falhas — mas resolve por perda um problema que
+uma constante resolve sem perda, e a inspeção do resultado mostrou o preço:
+deduplicação global apagava a linha `E ...Error` de blocos de falha seguintes,
+deixando o cabeçalho da falha sem o erro. Comprimir o artefato que instrui o
+conserto só se justifica quando ele não couber — e ele cabe.
+
+**Princípio:** todo corte de artefato precisa ser **dimensionado pela medição
+do artefato**, não pelo palpite de quem escreveu a constante. E corte
+silencioso é a pior variante: sem instrumentação, um `[-8000:]` nunca reclama —
+ele entrega metade do sinal com a mesma cara de quem entregou tudo. Antes de
+adotar máquina nova para caber no orçamento, confira se o orçamento é o certo.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```

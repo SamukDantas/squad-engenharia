@@ -16,7 +16,13 @@ from pathlib import Path
 
 IMAGEM = "squad-sandbox:latest"
 TIMEOUT_TESTES = 120     # segundos; estourou = reprova (loop infinito etc.)
-LIMITE_SAIDA = 8_000     # chars da saída guardados no estado
+# Chars da saída guardados no estado. O corte é pela **cauda**, e a 8.000 ele
+# mordia: medido numa suíte vermelha real, a saída tinha 19.422 chars e o corte
+# descartava 11.422 (59%) — 2 das 21 linhas de falha distintas nunca chegavam
+# ao dev, justamente quando o texto é a instrução de conserto. 20.000 cobre o
+# maior caso já observado com folga. O teto continua existindo de propósito:
+# contexto gigante satura o modelo e devolve resposta vazia (item 5).
+LIMITE_SAIDA = 20_000
 MEMORIA = "512m"
 CPUS = "1"
 
