@@ -767,6 +767,16 @@ com que o CLI aborta devolvendo 0 (`the user rejected permission...`,
 `auto-rejecting`) passam a levantar erro nomeando a causa, em vez de deixá-la
 para ser descoberta três nós adiante.
 
+**Emenda, descoberta ao varrer os workspaces antigos:** a primeira versão deste
+guard tinha o mesmo defeito uma camada abaixo. Ela contava **qualquer** caminho
+fora de `tests/`, e o mesmo executor que não escreveu nada numa rodada deixou um
+`app/__init__.py` de **0 bytes** na seguinte (thread `748d0fe4`, segunda
+rodada). Estrutura sem conteúdo: o guard teria aprovado, e a squad seguiria
+pagando QA em cima de um pacote vazio. Existir arquivo não é existir trabalho —
+que é o mesmo critério que `_cobertura` já aplicava ao ignorar módulo sem
+instruções, e que eu não apliquei ao escrever o guard. Corrigido: só conta
+arquivo com conteúdo não vazio.
+
 **Princípio:** **sucesso de processo não é sucesso de trabalho.** Onde um nó
 delega a um executor externo, o veredito tem que vir do artefato — o disco —,
 nunca do código de saída de quem deveria tê-lo produzido. É a mesma regra que

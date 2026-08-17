@@ -136,6 +136,17 @@ def _arquivos_do_workspace(workspace: str) -> list[str]:
     )
 
 
+def _tem_conteudo(workspace: str, rel: str) -> bool:
+    """Arquivo com algo dentro — 0 byte ou só espaço em branco não conta."""
+    caminho = Path(workspace) / rel
+    try:
+        if caminho.stat().st_size == 0:
+            return False
+        return bool(caminho.read_text(encoding="utf-8", errors="replace").strip())
+    except OSError:
+        return False
+
+
 def _conferir_entrega(arquivos: list[str], workspace: str) -> None:
     """Guard de entrega vazia: o nó de desenvolvimento não pode concluir sem
     ter produzido nada.
@@ -153,11 +164,25 @@ def _conferir_entrega(arquivos: list[str], workspace: str) -> None:
     checkpoint preserva o progresso: `main.py --thread <id>` retoma.
 
     Arquivos em `tests/` não contam como entrega: são do QA, e o executor é
-    proibido de tocá-los.
+    proibido de tocá-los. Arquivo **vazio** também não: a primeira versão
+    deste guard contava qualquer caminho fora de `tests/`, e o mesmo executor
+    que não escreveu nada numa rodada deixou um `app/__init__.py` de 0 bytes
+    na seguinte — estrutura sem conteúdo, que teria passado batido. Existir
+    arquivo não é existir trabalho, e o critério é o mesmo que `_cobertura`
+    já usa ao ignorar módulo sem instruções.
     """
-    if any(not a.startswith("tests/") for a in arquivos):
+    entregues = [
+        a for a in arquivos
+        if not a.startswith("tests/") and _tem_conteudo(workspace, a)
+    ]
+    if entregues:
         return
-    achado = f"apenas {len(arquivos)} arquivo(s) de teste" if arquivos else "nada"
+    if not arquivos:
+        achado = "nada"
+    elif all(a.startswith("tests/") for a in arquivos):
+        achado = f"apenas {len(arquivos)} arquivo(s) de teste"
+    else:
+        achado = f"{len(arquivos)} arquivo(s), todos vazios ou só de teste"
     raise RuntimeError(
         f"O executor de desenvolvimento concluiu sem escrever a entrega: {achado} "
         f"em {workspace}. Exit code 0 não prova trabalho feito — confira se o "
