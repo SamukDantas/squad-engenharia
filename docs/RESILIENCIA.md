@@ -835,6 +835,125 @@ adotar máquina nova para caber no orçamento, confira se o orçamento é o cert
 
 ---
 
+## 30. A jaula que o executor nunca teve
+
+**Sintoma:** nenhum — e é esse o ponto. O README descreve o nó de
+desenvolvimento como confinado ao workspace, e nada em execução contradizia
+isso. A auditoria só apareceu quando medimos o que o CLI enxerga de dentro de
+um workspace da squad:
+
+```
+opencode debug config   → 19 servidores MCP declarados, 15 habilitados
+opencode debug skill    → 623 skills carregadas do config global
+opencode debug agent    → 639 entradas de permissão, com "*" → allow
+```
+
+Entre os 15: `windows-mcp` (controle do sistema operacional), `docker` (que
+gerencia o próprio `squad-sandbox` que julga os testes), `github` com token de
+push, `supabase`, `ngrok`, `grafana`. E ~37,7k tokens só de nome e descrição
+das skills entrando no prompt **antes da spec**, em toda rodada.
+
+**Causa raiz:** `executar_opencode` passa `--dir <workspace>`, e ficou a
+suposição de que isso isolava a execução. Não isola: `--dir` troca o diretório
+de trabalho, enquanto a **configuração** continua vindo do `opencode.json`
+global do usuário, mesclada. A jaula de [`tools.py`](../src/squad/tools.py) é
+real, mas só vale para `DEV_EXECUTOR=crews` — o caminho **padrão** nunca passou
+por ela. Duas superfícies com o mesmo nome no README e garantias opostas.
+
+Pior, o problema cresce sozinho: qualquer MCP que o usuário instale na máquina
+para outro projeto passa a enxergar o workspace da squad na execução seguinte,
+sem nenhuma alteração no código.
+
+**Isto também reclassifica o item 28.** O aborto com exit 0 do `748d0fe4` foi
+atribuído ao `/tmp` do Windows. A causa real é o modelo de permissão: a chave
+`external_directory` tem default `ask`, e em headless não há quem responda —
+o CLI auto-rejeita e mata a run. O `/tmp` foi o gatilho; qualquer caminho fora
+do workspace produziria o mesmo. A correção do item 28 (falhar nomeando a
+causa) continua certa, mas tratava o sintoma.
+
+**Solução:** `_config_escopo` monta um config por execução e o entrega ao CLI
+por `OPENCODE_CONFIG_CONTENT`, que o OpenCode mescla por chave — fecha o
+escopo sem tocar na máquina do usuário:
+
+- **MCP**: todos desligados por nome, menos os de `OPENCODE_MCP_PERMITIDOS`
+  (padrão: nenhum). A lista desligada é a **união** dos servidores conhecidos
+  com os declarados no config global, para que um servidor novo não entre
+  calado — a correção não pode envelhecer em silêncio.
+- **Permissão**: `external_directory` explícito — workspace liberado, resto
+  negado — no lugar do `ask` que vira auto-rejeição.
+- **Skills**: interruptor `OPENCODE_SKILLS`, **desligado por padrão**. Este
+  default só foi virado depois de medir, porque mexer no que o executor lê é
+  mudança de qualidade e não só de custo. A primeira tentativa comparou
+  durações do grafo inteiro e não concluiu nada: o nó determinístico de
+  pytest, que não podia ter sido afetado, variou 171% entre execuções — se o
+  controle se move mais que o tratamento, a régua é curta demais.
+
+  A régua certa apareceu no export de sessão do OpenCode: a **primeira**
+  chamada de cada run tem `cache read: 0`, ou seja, é o preâmbulo cru. Ele é
+  determinístico — deu exatamente o mesmo valor nas 3 execuções de cada braço,
+  enquanto a duração do mesmo nó oscilava entre 204s e 411s.
+
+  | 3 execuções por braço | skills ligadas | skills desligadas |
+  |---|---|---|
+  | preâmbulo | 104.798 | **10.543** (−90%) |
+  | custo por rodada | $0,1658 | **$0,0367** (−78%) |
+  | entrega | 5 arquivos | 5 arquivos, idênticos |
+
+  As 623 skills eram 90% do que o executor lia antes de chegar na spec, e o
+  grafo pode gastar 3 rodadas. A estimativa que eu tinha feito antes de medir
+  (~37,7k tokens, contando nome e descrição) errou por mais de 2x para baixo.
+
+**Princípio:** **flag de diretório não é fronteira de confiança.** Quando um nó
+delega a uma ferramenta externa, a superfície dela é o que a *configuração da
+máquina* define, não o que o argumento da chamada sugere — e o default de toda
+ferramenta madura é herdar o ambiente do usuário, porque é isso que serve ao
+uso interativo. Isolamento que não foi declarado explicitamente não existe; e
+diferente das outras falhas deste documento, esta não produz sintoma nenhum
+até produzir o pior possível. Só medição encontra: o que a squad enxerga tem
+que ser **auditável por comando**, não deduzido do código.
+
+---
+
+## 31. O nó que entregou tudo e morreu ao contar
+
+**Sintoma:** thread `20051ccc`. O nó de desenvolvimento rodou 244s, o OpenCode
+escreveu a entrega inteira (`main.py`, `db.py`, `repository.py`, `schemas.py`,
+`README.md`) — e o grafo caiu:
+
+```
+UnicodeEncodeError: 'charmap' codec can't encode character '→'
+```
+
+**Causa raiz:** `print(saida[-LIMITE_SAIDA:])`. A saída do OpenCode traz setas
+(`→`), ícones e box-drawing. Quando o stdout é **redirecionado** — arquivo,
+pipe, CI —, o Python no Windows abandona a codepage do console e usa a local
+(cp1252), que não tem esses caracteres. O mesmo pedido rodando num terminal
+interativo passa; redirecionado, quebra. Por isso não aparecia: todas as
+execuções anteriores tinham sido interativas.
+
+O detalhe que dói é *onde* quebrou. O trabalho estava **feito e em disco**. O
+nó não falhou executando — falhou **relatando**. E o guard do item 28 não pega
+este caso, porque ele checa entrega vazia e a entrega estava cheia.
+
+Havia um segundo alcance escondido: as mensagens de `RuntimeError` embutem o
+mesmo trecho de saída, e quem as imprime é a `main`. Uma falha do executor com
+seta na saída viraria `UnicodeEncodeError` **ao reportar a falha original** —
+o modo de falha mais caro que existe, porque destrói a evidência do defeito
+que se estava tentando diagnosticar.
+
+**Solução:** `_relatavel()` recodifica pelo `sys.stdout.encoding` com
+`errors="replace"` antes de qualquer uso — o eco no log e as duas mensagens de
+erro. Caractere que a saída não suporta vira `?`; o relato sobrevive.
+
+**Princípio:** **relatar não pode ser mais frágil do que fazer.** Todo texto
+que vem de processo externo é bytes arbitrários, não string amigável, e o
+caminho de relato é justamente o que roda *depois* do trabalho caro e *durante*
+o diagnóstico de falhas. Uma camada de observabilidade que derruba o que
+observa inverte o próprio propósito — e o ambiente que a expõe (stdout
+redirecionado) é exatamente o de CI e automação, onde ninguém está olhando.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
