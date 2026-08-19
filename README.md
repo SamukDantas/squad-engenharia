@@ -83,6 +83,36 @@ No modo padrão (`DEV_EXECUTOR=opencode`) é preciso ter o **OpenCode CLI**
 instalado e autenticado (`npm i -g opencode-ai`). Para rodar sem o CLI, use
 `DEV_EXECUTOR=crews` no `.env`.
 
+O `--dir` do CLI troca o diretório de trabalho, mas **não isola a
+configuração**: sem intervenção, o executor herda o `opencode.json` global da
+sua máquina — servidores MCP e skills incluídos. Numa instalação real isso
+significava 15 MCP habilitados (entre eles controle do SO, Docker e GitHub com
+token de push) e 623 skills. A squad fecha esse escopo por execução, e duas
+variáveis do `.env` controlam o que fica de pé:
+
+| Variável | Padrão | O que faz |
+|---|---|---|
+| `OPENCODE_MCP_PERMITIDOS` | vazio | MCP visíveis ao executor; vazio = nenhum |
+| `OPENCODE_SKILLS` | `0` | `1` carrega as skills globais no prompt |
+
+O padrão das skills veio de medição — 3 execuções por braço, mesmo pedido,
+entrega idêntica nas 6:
+
+| | skills ligadas | skills desligadas |
+|---|---|---|
+| preâmbulo por rodada | 104.798 tokens | **10.543** |
+| custo por rodada | $0,1658 | **$0,0367** |
+
+As skills instaladas eram 90% do que o executor lia antes de chegar na spec.
+
+Auditar o que o executor enxerga, de dentro de um workspace:
+
+```bash
+opencode debug config
+```
+
+Detalhes e causa raiz em [docs/RESILIENCIA.md](docs/RESILIENCIA.md), item 30.
+
 Os testes gerados rodam em **sandbox Docker** (`TEST_RUNNER=docker`, padrão).
 Construa a imagem uma vez:
 
