@@ -954,10 +954,59 @@ redirecionado) é exatamente o de CI e automação, onde ninguém está olhando.
 
 ---
 
+## 32. A rodada de correção que não corrigiu nada
+
+**Sintoma:** thread `ac0c7d4e` (agendador de tarefas). O revisor reprovou por
+um defeito real — condição de corrida entre `cancel_task` e a submissão em
+`_check_due_tasks`, com `_run_task` sem revalidar o status. A rodada de
+correção rodou 109,5s, o pytest seguinte voltou verde, e a segunda revisão
+repetiu o apontamento **palavra por palavra**.
+
+Palavra por palavra porque o código era o mesmo:
+
+```
+rodada de correção:    16:41:34 → 16:43:23
+arquivo mais recente:  tests/test_main.py  16:38:06   ← anterior à rodada
+```
+
+Nenhum arquivo da entrega tem mtime dentro da janela. A cobertura seguinte
+bateu idêntica ao dígito (99,5% / 98,4%). O executor não escreveu nada, e o
+grafo registrou o nó como concluído.
+
+**Causa raiz:** o guard de entrega vazia (item 28) faz a pergunta certa para a
+rodada **inicial** — "existe arquivo?" — e a pergunta errada para uma rodada de
+correção, onde o workspace já está cheio da rodada anterior. Um executor que
+ignora o feedback por completo passa pelos dois critérios: a entrega existe e
+tem conteúdo. O que ninguém perguntava era se ela havia **mudado**.
+
+O custo foi o orçamento inteiro de revisões gasto sem que nenhuma tentativa de
+conserto tivesse existido: `MAX_REVISOES` estourou com o defeito intacto, e o
+gate humano recebeu trabalho reprovado como se duas correções tivessem sido
+tentadas e falhado. A diferença importa — "tentou e não conseguiu" e "não
+tentou" pedem decisões opostas de quem revisa.
+
+**Solução:** `_impressao_entrega` tira um hash SHA-256 por arquivo da entrega
+antes e depois de toda rodada de correção, e `_conferir_correcao` falha alto
+quando os dois conjuntos são idênticos. Compara **conteúdo, não mtime**:
+executor que reescreve o mesmo arquivo byte a byte não corrigiu nada. Ignora
+`tests/`, que é do QA e que o executor é proibido de tocar — mudança lá não
+prova que a correção pedida foi feita. Na rodada inicial o guard não roda: lá
+não há "antes", e o item 28 já é o critério certo.
+
+**Princípio:** **cada guard responde à pergunta da sua rodada.** A mesma camada
+que prova trabalho numa etapa pode ser vazia na seguinte, porque o que conta
+como evidência mudou — na primeira rodada a evidência é o artefato existir, na
+segunda é ele ter mudado. Guard herdado de outra fase sem revisar a pergunta dá
+a sensação de cobertura sem a cobertura: ele continua passando, e é justamente
+por continuar passando que ninguém percebe que parou de medir.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
 Camada 0 — Guard de entrega     (grátis, determinístico) → pega executor que não produziu nada
+            + guard de correção                          → e o que produziu o mesmo de antes
 Camada 1 — Guard de aderência   (barato, automático)     → pega tema errado
 Camada 2 — Guard de critérios   (barato, automático)     → pega suíte que não testa a spec
 Camada 3 — pytest na jaula      (barato, determinístico) → pega defeito que executa errado

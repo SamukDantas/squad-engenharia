@@ -8,6 +8,7 @@ Regra de divisão:
   pelo exit code do pytest e pela cobertura (nós determinísticos), e o revisor
   LLM cobre apenas o que execução não pega.
 """
+import hashlib
 import os
 import sqlite3
 from fnmatch import fnmatch
@@ -189,6 +190,57 @@ def _conferir_entrega(arquivos: list[str], workspace: str) -> None:
         "modelo do executor suporta tool calling, se as credenciais têm saldo e "
         "se a saída acima registra permissão negada. Nada a corrigir sem código: "
         "o grafo para aqui em vez de pagar QA e pytest em cima do vazio."
+    )
+
+
+def _impressao_entrega(workspace: str) -> dict[str, str]:
+    """Hash do conteúdo de cada arquivo da entrega, para comparar rodadas.
+
+    Só a entrega: `tests/` é do QA e o executor é proibido de tocar, então
+    mudança lá não prova que a correção pedida foi feita. Compara conteúdo e
+    não mtime — executor que reescreve o arquivo idêntico não corrigiu nada.
+    """
+    raiz = Path(workspace)
+    impressao: dict[str, str] = {}
+    for rel in _arquivos_do_workspace(workspace):
+        if rel.startswith("tests/"):
+            continue
+        try:
+            impressao[rel] = hashlib.sha256((raiz / rel).read_bytes()).hexdigest()
+        except OSError:
+            continue
+    return impressao
+
+
+def _conferir_correcao(antes: dict[str, str], depois: dict[str, str], origem: str) -> None:
+    """Guard de rodada de correção: corrigir sem mudar nada não é corrigir.
+
+    O guard de entrega vazia cobre a rodada **inicial** — se não há arquivo, o
+    executor não trabalhou. Numa rodada de correção ele não cobre nada: o
+    workspace já está cheio da rodada anterior, e um executor que ignorou o
+    feedback por completo passa como nó concluído.
+
+    Medido na thread `ac0c7d4e` (agendador de tarefas): o revisor reprovou por
+    uma condição de corrida entre cancelamento e execução, a rodada de correção
+    rodou 109,5s, **não escreveu um único arquivo**, o pytest seguinte devolveu
+    cobertura idêntica ao dígito e a segunda revisão repetiu o apontamento
+    palavra por palavra — porque o código era o mesmo. O orçamento de revisões
+    acabou ali, sem que nenhuma tentativa de conserto tivesse existido.
+
+    Falha alto, como o item 28: repetir a rodada que não mudou nada tende a não
+    mudar nada de novo, e a causa costuma ser de configuração ou de feedback
+    que o executor não conseguiu acionar. O checkpoint preserva tudo.
+    """
+    if antes != depois:
+        return
+    raise RuntimeError(
+        f"A rodada de correção (origem: {origem}) terminou sem alterar a entrega: "
+        f"{len(depois)} arquivo(s), todos byte a byte idênticos aos de antes. "
+        "O executor recebeu o feedback e não o acionou — repetir a rodada tende "
+        "a repetir o resultado, e o veredito seguinte vai reproduzir o mesmo "
+        "apontamento sobre o mesmo código. Confira se o feedback chegou "
+        "acionável ao executor e se o modelo suporta tool calling. O checkpoint "
+        "preserva o progresso: `main.py --thread <id>` retoma."
     )
 
 
@@ -382,6 +434,9 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     executor = os.getenv("DEV_EXECUTOR", "opencode").strip().lower()
     feedback = state.get("feedback_qa", "")
     origem = state.get("origem_feedback") or "inicial"
+    # Só numa rodada de correção há "antes" com que comparar; na inicial o
+    # guard de entrega vazia já é o critério certo.
+    antes = _impressao_entrega(state["workspace"]) if origem != "inicial" else None
     with medir(_tid(config), "desenvolvimento", executor=executor, origem=origem):
         if executor == "opencode":
             executar_opencode(state["workspace"], state["spec"], feedback)
@@ -400,6 +455,8 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     # varredura determinística do workspace, não do texto do executor.
     arquivos = _arquivos_do_workspace(state["workspace"])
     _conferir_entrega(arquivos, state["workspace"])
+    if antes is not None:
+        _conferir_correcao(antes, _impressao_entrega(state["workspace"]), origem)
     return {
         "arquivos": arquivos,
         "codigo": _dump_codigo(state["workspace"], arquivos),
