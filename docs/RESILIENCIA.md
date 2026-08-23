@@ -954,10 +954,139 @@ redirecionado) é exatamente o de CI e automação, onde ninguém está olhando.
 
 ---
 
+## 32. A rodada de correção que não corrigiu nada
+
+**Sintoma:** thread `ac0c7d4e` (agendador de tarefas). O revisor reprovou por
+um defeito real — condição de corrida entre `cancel_task` e a submissão em
+`_check_due_tasks`, com `_run_task` sem revalidar o status. A rodada de
+correção rodou 109,5s, o pytest seguinte voltou verde, e a segunda revisão
+repetiu o apontamento **palavra por palavra**.
+
+Palavra por palavra porque o código era o mesmo:
+
+```
+rodada de correção:    16:41:34 → 16:43:23
+arquivo mais recente:  tests/test_main.py  16:38:06   ← anterior à rodada
+```
+
+Nenhum arquivo da entrega tem mtime dentro da janela. A cobertura seguinte
+bateu idêntica ao dígito (99,5% / 98,4%). O executor não escreveu nada, e o
+grafo registrou o nó como concluído.
+
+**Causa raiz:** o guard de entrega vazia (item 28) faz a pergunta certa para a
+rodada **inicial** — "existe arquivo?" — e a pergunta errada para uma rodada de
+correção, onde o workspace já está cheio da rodada anterior. Um executor que
+ignora o feedback por completo passa pelos dois critérios: a entrega existe e
+tem conteúdo. O que ninguém perguntava era se ela havia **mudado**.
+
+O custo foi o orçamento inteiro de revisões gasto sem que nenhuma tentativa de
+conserto tivesse existido: `MAX_REVISOES` estourou com o defeito intacto, e o
+gate humano recebeu trabalho reprovado como se duas correções tivessem sido
+tentadas e falhado. A diferença importa — "tentou e não conseguiu" e "não
+tentou" pedem decisões opostas de quem revisa.
+
+**Solução:** `_impressao_entrega` tira um hash SHA-256 por arquivo da entrega
+antes e depois de toda rodada de correção, e `_conferir_correcao` falha alto
+quando os dois conjuntos são idênticos. Compara **conteúdo, não mtime**:
+executor que reescreve o mesmo arquivo byte a byte não corrigiu nada. Ignora
+`tests/`, que é do QA e que o executor é proibido de tocar — mudança lá não
+prova que a correção pedida foi feita. Na rodada inicial o guard não roda: lá
+não há "antes", e o item 28 já é o critério certo.
+
+**Princípio:** **cada guard responde à pergunta da sua rodada.** A mesma camada
+que prova trabalho numa etapa pode ser vazia na seguinte, porque o que conta
+como evidência mudou — na primeira rodada a evidência é o artefato existir, na
+segunda é ele ter mudado. Guard herdado de outra fase sem revisar a pergunta dá
+a sensação de cobertura sem a cobertura: ele continua passando, e é justamente
+por continuar passando que ninguém percebe que parou de medir.
+
+---
+
+## 33. O teto que não era teto, e o revisor que julgava por amostra
+
+**Sintoma:** nenhum, de novo. O revisor aprovava e reprovava normalmente, os
+testes rodavam, o grafo fechava. A auditoria só apareceu ao medir o que cada nó
+manda para o LLM, nas 14 entregas já em disco:
+
+```
+LIMITE_DUMP_CODIGO = 15.000
+dump real em 126d542c → 43.918 chars   (193% acima do teto declarado)
+dump truncado em      → 10 de 14 entregas (71%)
+arquivo onde o corte caiu → tests/*, em 8 dos 11 casos
+```
+
+E dentro do dump, lido como texto e enviado ao modelo: `tarefas.db` (12.303
+chars) e `tasks.db` (16.397) — SQLite binário, 56% do dump de uma das entregas.
+
+**Causa raiz:** três defeitos empilhados na mesma função, `_dump_codigo`.
+
+O primeiro é de ordem: o laço acrescentava o bloco e **depois** conferia o
+total. Um arquivo grande passava inteiro, então o teto não limitava nada — só
+avisava, tarde, que já tinha sido ultrapassado.
+
+O segundo é de fila: `sorted()` põe `tests/` por último, então o corte sempre
+caía na suíte. O revisor recebia o código e perdia os testes, sem que o texto
+dissesse quais arquivos faltavam. Ele julgava por amostra sem saber que era
+amostra — exatamente a falha que `_amostra_testes` já descrevia na própria
+docstring e já tinha corrigido, três funções abaixo, para o guard de critérios.
+A correção existia no arquivo e não tinha sido aplicada ao vizinho.
+
+O terceiro é de filtro: `_arquivos_do_workspace` só exclui `.pyc`. Qualquer
+binário que a entrega gere — e uma API com persistência gera — ia como texto
+para o contexto, gastando orçamento e devolvendo ruído.
+
+**Solução:** `_blocos_com_orcamento`, uma função só, usada pelo dump do revisor
+e pela amostra do guard. O orçamento é conferido **antes** de acrescentar, e
+cabeçalho de bloco, separador e marcador de truncagem saem dele — reservar só o
+conteúdo deixaria o total estourar em silêncio de novo, que era o defeito
+original. A repartição é água em copos: os arquivos entram em ordem crescente
+de tamanho, cada um leva no máximo a sua cota, e o que sobra dos pequenos é
+redividido entre os grandes. O manifesto lista **todos** os nomes, inclusive os
+que entraram truncados, para que ninguém confunda ausência com omissão. Fonte
+antes de teste na fila, porque o revisor já recebe `saida_testes` em separado.
+E os binários são cortados **na fronteira do LLM**, não na varredura do
+workspace: eles são entrega e continuam indo ao deploy.
+
+Medido sobre as mesmas 14 entregas:
+
+| | antes | depois |
+|---|---:|---:|
+| agregado dos dumps | 279.061 chars | **179.385** (−36%) |
+| pior caso (`126d542c`) | 43.918 | **14.999** (−66%) |
+| entregas acima do teto | 11 | **0** |
+| arquivos invisíveis ao revisor | até 8 por rodada | **0** |
+
+**A decisão de não adotar ferramenta externa vem daqui.** A alternativa
+avaliada era plugar um compressor de contexto (Headroom) como proxy — o
+`base_url` de [`llm.py`](../src/squad/llm.py) já é uma variável de ambiente, e
+custaria zero linha. A medição matou a ideia: o proxy alcançaria as superfícies
+do CrewAI, que são **29%** dos tokens da execução (o executor OpenCode é os
+outros 71%), e a taxa que a ferramenta declara para agentes de código é 15–20%
+— **5% do custo total**, meio centavo por execução, em troca de um daemon cuja
+queda derruba toda chamada de LLM e de um `output shaper` que encurta a
+conclusão do modelo justamente onde `_veredito_aprovado` procura o veredito
+(item 7). Consertar os três defeitos acima cortou 36% do mesmo blob, de graça.
+Pelo mesmo motivo ficaram de fora um indexador de grafo de código (ganho
+declarado para 500+ arquivos; as entregas têm de 1 a 22) e um serviço de E2E na
+nuvem (exigiria expor a entrega em rede, invertendo o `--network none` do
+item 21).
+
+**Princípio:** **limite que não é conferido antes de gastar não é limite, é
+comentário.** E quando o corte precisa acontecer, *o que* se corta é decisão de
+projeto tanto quanto *quanto*: truncar pelo total delega a escolha à ordem
+alfabética, que não sabe nada sobre o que importa, e o custo aparece como
+julgamento de pior qualidade — não como erro. Antes de comprar redução de
+contexto de fora, vale medir o que o próprio código já desperdiça: aqui a
+gordura era maior que o ganho da ferramenta, e removê-la tirou risco em vez de
+adicionar.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
 Camada 0 — Guard de entrega     (grátis, determinístico) → pega executor que não produziu nada
+            + guard de correção                          → e o que produziu o mesmo de antes
 Camada 1 — Guard de aderência   (barato, automático)     → pega tema errado
 Camada 2 — Guard de critérios   (barato, automático)     → pega suíte que não testa a spec
 Camada 3 — pytest na jaula      (barato, determinístico) → pega defeito que executa errado

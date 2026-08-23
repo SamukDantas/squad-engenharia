@@ -8,6 +8,7 @@ Regra de divisão:
   pelo exit code do pytest e pela cobertura (nós determinísticos), e o revisor
   LLM cobre apenas o que execução não pega.
 """
+import hashlib
 import os
 import sqlite3
 from fnmatch import fnmatch
@@ -192,47 +193,156 @@ def _conferir_entrega(arquivos: list[str], workspace: str) -> None:
     )
 
 
-def _dump_codigo(workspace: str, arquivos: list[str]) -> str:
-    """Concatena o conteúdo real dos arquivos (limitado) para injetar na
-    tarefa do revisor — artefato que decide roteamento não pode depender só
-    de elos de contexto entre tarefas (RESILIENCIA.md, item 10)."""
-    partes: list[str] = []
-    total = 0
+def _impressao_entrega(workspace: str) -> dict[str, str]:
+    """Hash do conteúdo de cada arquivo da entrega, para comparar rodadas.
+
+    Só a entrega: `tests/` é do QA e o executor é proibido de tocar, então
+    mudança lá não prova que a correção pedida foi feita. Compara conteúdo e
+    não mtime — executor que reescreve o arquivo idêntico não corrigiu nada.
+    """
+    raiz = Path(workspace)
+    impressao: dict[str, str] = {}
+    for rel in _arquivos_do_workspace(workspace):
+        if rel.startswith("tests/"):
+            continue
+        try:
+            impressao[rel] = hashlib.sha256((raiz / rel).read_bytes()).hexdigest()
+        except OSError:
+            continue
+    return impressao
+
+
+def _conferir_correcao(antes: dict[str, str], depois: dict[str, str], origem: str) -> None:
+    """Guard de rodada de correção: corrigir sem mudar nada não é corrigir.
+
+    O guard de entrega vazia cobre a rodada **inicial** — se não há arquivo, o
+    executor não trabalhou. Numa rodada de correção ele não cobre nada: o
+    workspace já está cheio da rodada anterior, e um executor que ignorou o
+    feedback por completo passa como nó concluído.
+
+    Medido na thread `ac0c7d4e` (agendador de tarefas): o revisor reprovou por
+    uma condição de corrida entre cancelamento e execução, a rodada de correção
+    rodou 109,5s, **não escreveu um único arquivo**, o pytest seguinte devolveu
+    cobertura idêntica ao dígito e a segunda revisão repetiu o apontamento
+    palavra por palavra — porque o código era o mesmo. O orçamento de revisões
+    acabou ali, sem que nenhuma tentativa de conserto tivesse existido.
+
+    Falha alto, como o item 28: repetir a rodada que não mudou nada tende a não
+    mudar nada de novo, e a causa costuma ser de configuração ou de feedback
+    que o executor não conseguiu acionar. O checkpoint preserva tudo.
+    """
+    if antes != depois:
+        return
+    raise RuntimeError(
+        f"A rodada de correção (origem: {origem}) terminou sem alterar a entrega: "
+        f"{len(depois)} arquivo(s), todos byte a byte idênticos aos de antes. "
+        "O executor recebeu o feedback e não o acionou — repetir a rodada tende "
+        "a repetir o resultado, e o veredito seguinte vai reproduzir o mesmo "
+        "apontamento sobre o mesmo código. Confira se o feedback chegou "
+        "acionável ao executor e se o modelo suporta tool calling. O checkpoint "
+        "preserva o progresso: `main.py --thread <id>` retoma."
+    )
+
+
+# Extensões cujo conteúdo não é texto de revisar. Binário lido com
+# `errors="replace"` vira ruído no contexto do LLM sem informar nada: medido nas
+# entregas já existentes, `tarefas.db` (12.303 chars) e `tasks.db` (16.397)
+# foram enviados inteiros ao revisor — 56% do dump de uma delas. A varredura do
+# workspace continua vendo esses arquivos (eles são entrega e vão ao deploy);
+# o corte é só no que se manda para o modelo.
+_EXTENSOES_BINARIAS = {
+    ".db", ".sqlite", ".sqlite3", ".png", ".jpg", ".jpeg", ".gif", ".webp",
+    ".ico", ".svg", ".pdf", ".zip", ".gz", ".tar", ".whl", ".so", ".dll",
+    ".exe", ".bin", ".pickle", ".pkl",
+}
+
+
+def _e_binario(rel: str) -> bool:
+    return Path(rel).suffix.lower() in _EXTENSOES_BINARIAS
+
+
+def _blocos_com_orcamento(
+    workspace: str, arquivos: list[str], limite: int, rotulo: str
+) -> str:
+    """Concatena arquivos dentro de um teto, **repartindo** o orçamento.
+
+    Truncar pelo total (os primeiros N chars) faz quem lê julgar por amostra sem
+    saber: os arquivos no fim da fila ficam invisíveis. Aqui cada arquivo tem
+    cota, o que sobra de arquivo pequeno é redistribuído aos grandes (fila em
+    ordem crescente de tamanho), e o manifesto lista todos os nomes — inclusive
+    os que entraram truncados, para que ninguém confunda ausência com omissão.
+    """
+    if not arquivos:
+        return ""
+
+    conteudos = {
+        rel: (Path(workspace) / rel).read_text(encoding="utf-8", errors="replace")
+        for rel in arquivos
+    }
+    manifesto = "\n".join(f"- {a}" for a in arquivos)
+    cabecalho = f"{rotulo} ({len(arquivos)}):\n{manifesto}\n\n"
+
+    # O teto vale para o texto inteiro, então cabeçalho de bloco e separador
+    # saem do orçamento antes de ele ser repartido: reservar só o conteúdo
+    # deixaria o total estourar em silêncio de novo, que é o defeito original.
+    moldura = {rel: len(f"### {rel}\n") + 1 for rel in arquivos}
+    saldo = max(limite - len(cabecalho) - sum(moldura.values()), 0)
+
+    # Água em copos: o menor primeiro leva só o que precisa, e o saldo restante
+    # é redividido entre os que ainda não tiveram vez.
+    fila = sorted(arquivos, key=lambda rel: len(conteudos[rel]))
+    cotas: dict[str, int] = {}
+    for i, rel in enumerate(fila):
+        cotas[rel] = min(len(conteudos[rel]), saldo // (len(fila) - i))
+        saldo -= cotas[rel]
+
+    partes = []
     for rel in arquivos:
-        conteudo = (Path(workspace) / rel).read_text(encoding="utf-8", errors="replace")
-        bloco = f"### {rel}\n{conteudo}\n"
-        partes.append(bloco)
-        total += len(bloco)
-        if total > LIMITE_DUMP_CODIGO:
-            partes.append("### [dump truncado no limite]")
-            break
-    return "\n".join(partes)
+        conteudo = conteudos[rel]
+        if len(conteudo) > cotas[rel]:
+            # O marcador também ocupa a cota: sem descontá-lo, cada arquivo
+            # truncado devolveria mais texto do que lhe foi orçado.
+            marcador = (
+                f"\n[... {rel} truncado aqui "
+                f"({len(conteudo)} chars no total) ...]"
+            )
+            conteudo = conteudo[:max(cotas[rel] - len(marcador), 0)] + marcador
+        partes.append(f"### {rel}\n{conteudo}")
+    return cabecalho + "\n".join(partes)
+
+
+def _dump_codigo(workspace: str, arquivos: list[str]) -> str:
+    """Conteúdo real da entrega para injetar na tarefa do revisor — artefato que
+    decide roteamento não pode depender só de elos de contexto entre tarefas
+    (RESILIENCIA.md, item 10).
+
+    A primeira versão acrescentava o bloco e **depois** conferia o total, então o
+    teto não limitava nada: medido nas 14 entregas em disco, o dump chegou a
+    43.918 chars com `LIMITE_DUMP_CODIGO` em 15.000 (193% acima) e truncava em 10
+    delas. E como `sorted()` põe `tests/` por último, quem sumia era sempre a
+    suíte — em 8 dos 11 casos truncados. O revisor aprovava código que não tinha
+    visto inteiro, sem saber que faltava pedaço.
+
+    É o mesmo defeito que `_amostra_testes` já corrigia logo abaixo, então os
+    dois passaram a dividir `_blocos_com_orcamento`. Fonte antes de teste na
+    fila do manifesto: o revisor já recebe `saida_testes` em separado, então
+    perder trecho de teste custa menos que perder o módulo que a spec descreve.
+    """
+    revisaveis = [a for a in arquivos if not _e_binario(a)]
+    fonte = [a for a in revisaveis if not a.startswith("tests/")]
+    testes = [a for a in revisaveis if a.startswith("tests/")]
+    return _blocos_com_orcamento(
+        workspace, fonte + testes, LIMITE_DUMP_CODIGO, "Arquivos da entrega"
+    )
 
 
 def _amostra_testes(workspace: str, arquivos: list[str]) -> str:
     """Amostra da suíte para o guard de critérios, com **todos** os arquivos
-    representados.
-
-    Truncar a suíte no total (os primeiros N chars) faz o guard julgar por
-    amostra sem saber: arquivos no fim da ordem alfabética ficam invisíveis, e
-    ele reprova por não ver testes que existem. Aqui o orçamento é dividido
-    entre os arquivos e o manifesto lista a suíte inteira.
-    """
-    testes = [a for a in arquivos if a.startswith("tests/")]
-    if not testes:
-        return ""
-
-    manifesto = "\n".join(f"- {a}" for a in testes)
-    cabecalho = f"Arquivos de teste na suíte ({len(testes)}):\n{manifesto}\n\n"
-    por_arquivo = max((LIMITE_AMOSTRA_TESTES - len(cabecalho)) // len(testes), 500)
-
-    partes = []
-    for rel in testes:
-        conteudo = (Path(workspace) / rel).read_text(encoding="utf-8", errors="replace")
-        if len(conteudo) > por_arquivo:
-            conteudo = f"{conteudo[:por_arquivo]}\n[... {rel} truncado aqui ...]"
-        partes.append(f"### {rel}\n{conteudo}")
-    return cabecalho + "\n".join(partes)
+    representados — senão ele reprova por não ver testes que existem."""
+    testes = [a for a in arquivos if a.startswith("tests/") and not _e_binario(a)]
+    return _blocos_com_orcamento(
+        workspace, testes, LIMITE_AMOSTRA_TESTES, "Arquivos de teste na suíte"
+    )
 
 
 # ---------- nós determinísticos ----------
@@ -361,6 +471,7 @@ def no_validacao_spec(state: EstadoProjeto, config: RunnableConfig) -> EstadoPro
     produzida trata mesmo do pedido, antes de gastar tokens com desenvolvimento.
     Protege contra alucinação da crew de planejamento (spec de outro tema)."""
     with medir(_tid(config), "validacao_spec") as m:
+        m.update(chars_contexto=len(state["pedido"]) + len(state["spec"][:8000]))
         veredito = com_retry("guard de aderência", lambda: zen_llm().call(
             "Você é um verificador rigoroso. Responda APENAS com a palavra SIM ou "
             f'NAO. A especificação técnica abaixo trata do pedido "{state["pedido"]}"'
@@ -382,7 +493,13 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     executor = os.getenv("DEV_EXECUTOR", "opencode").strip().lower()
     feedback = state.get("feedback_qa", "")
     origem = state.get("origem_feedback") or "inicial"
-    with medir(_tid(config), "desenvolvimento", executor=executor, origem=origem):
+    # Só numa rodada de correção há "antes" com que comparar; na inicial o
+    # guard de entrega vazia já é o critério certo.
+    antes = _impressao_entrega(state["workspace"]) if origem != "inicial" else None
+    with medir(
+        _tid(config), "desenvolvimento", executor=executor, origem=origem
+    ) as m:
+        m.update(chars_contexto=len(state["spec"]) + len(feedback))
         if executor == "opencode":
             executar_opencode(state["workspace"], state["spec"], feedback)
         elif executor == "crews":
@@ -400,6 +517,8 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     # varredura determinística do workspace, não do texto do executor.
     arquivos = _arquivos_do_workspace(state["workspace"])
     _conferir_entrega(arquivos, state["workspace"])
+    if antes is not None:
+        _conferir_correcao(antes, _impressao_entrega(state["workspace"]), origem)
     return {
         "arquivos": arquivos,
         "codigo": _dump_codigo(state["workspace"], arquivos),
@@ -410,11 +529,17 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
 
 
 def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
-    with medir(_tid(config), "escrever_testes"):
+    arquivos_antes = "\n".join(state.get("arquivos", []))
+    with medir(_tid(config), "escrever_testes") as m:
+        m.update(chars_contexto=(
+            len(state["spec"])
+            + len(arquivos_antes)
+            + len(state.get("feedback_qa", ""))
+        ))
         com_retry("escrita de testes", lambda: crew_testes(state["workspace"]).kickoff(
             inputs={
                 "spec": state["spec"],
-                "arquivos": "\n".join(state.get("arquivos", [])) or "(workspace vazio)",
+                "arquivos": arquivos_antes or "(workspace vazio)",
                 "feedback_qa": state.get("feedback_qa", "") or "Nenhum — primeira rodada.",
             }
         ), caro=True)
@@ -439,6 +564,7 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
         return {"testes_aderentes": False}
 
     with medir(_tid(config), "validacao_testes") as m:
+        m.update(chars_contexto=len(state["spec"][:6000]) + len(testes))
         veredito = com_retry("guard de critérios", lambda: zen_llm().call(
             "Você é um verificador rigoroso de testes. Responda APENAS com a "
             "palavra SIM ou NAO. Os testes abaixo verificam de fato os "
@@ -475,6 +601,12 @@ def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     # Ainda é o relatório da rodada anterior: este nó só o sobrescreve ao retornar.
     anterior = (state.get("relatorio_qa") or "")[:LIMITE_REVISAO_ANTERIOR]
     with medir(_tid(config), "revisao") as m:
+        m.update(chars_contexto=(
+            len(state["codigo"])
+            + len(state["spec"])
+            + len(state.get("saida_testes", ""))
+            + len(anterior)
+        ))
         resultado = com_retry("revisão", lambda: crew_revisao().kickoff(
             inputs={
                 "codigo": state["codigo"],
