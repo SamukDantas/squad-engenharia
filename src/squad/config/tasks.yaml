@@ -66,8 +66,15 @@ consolidar_entrega:
     inconsistências entre backend e integração editando os arquivos com
     escrever_arquivo, e escreva um README.md na raiz do workspace com a
     estrutura de arquivos e as instruções de execução.
+    Escreva também `.squad/run.json` declarando como subir a aplicação como
+    servidor HTTP, para o pipeline de segurança atacá-la. Formato exato:
+    {"cmd": ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"],
+    "port": 8000, "health_path": "/docs"}. Use o comando real desta entrega
+    (módulo/porta corretos; Flask usa flask --app <mod> run --host 0.0.0.0
+    --port <p>); health_path é uma rota que responde com a app no ar.
   expected_output: >
-    Manifesto final dos arquivos da entrega, com o README.md incluído.
+    Manifesto final dos arquivos da entrega, com o README.md e o
+    .squad/run.json incluídos.
   agent: tech_lead
 
 # --- Crew de qualidade ---

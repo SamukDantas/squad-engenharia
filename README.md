@@ -7,8 +7,8 @@ usando **LangGraph** como orquestrador (estado, checkpoints, gates humanos) e
 ## Arquitetura
 
 ```
-Triagem → Crew planejamento → Guard de aderência → Crew desenvolvimento → Crew testes → pytest → Crew revisão → Aprovação humana → Deploy
-              ↑____↻ spec incoerente (máx. 2)_|      ↑_______↻ testes vermelhos (máx. 3) / revisão reprovada (máx. 2)____↻_|
+Triagem → Planejamento → Guard aderência → Desenvolvimento → Testes → pytest → Revisão → Pentest → Aprovação humana → Deploy
+              ↑__↻ spec incoerente (máx. 2)_|   ↑___↻ testes vermelhos (máx. 3) / revisão reprovada (máx. 2) / vuln bloqueante (máx. 2)___↻_|
 ```
 
 Princípio central: **vereditos vêm de execução, não de opinião**. O executor
@@ -17,6 +17,14 @@ o QA escreve testes pytest reais e um nó **determinístico** executa o pytest �
 o laço de correções é roteado pelo **exit code**, não pela palavra de um LLM.
 O revisor LLM só roda com testes verdes e cobre o que execução não pega
 (legibilidade, segurança, aderência à spec).
+
+A segurança tem também uma camada de **execução**, não só de opinião: com
+`PENTEST_HABILITADO=1`, um nó determinístico sobe a entrega como servidor num
+sandbox Docker isolado (rede `--internal`, sem egress) e a ataca com um toolset
+ofensivo (nuclei, nikto, sqlmap, ffuf). Vulnerabilidade acima do piso de
+severidade reabre o laço de desenvolvimento com um brief de correção, com
+orçamento próprio; abaixo do piso, informa o gate humano. É a mesma régua do
+pytest — veredito por ataque real — aplicada à segurança.
 
 O nó de desenvolvimento é **intercambiável** (`DEV_EXECUTOR`): por padrão usa
 o **OpenCode CLI** em modo headless como mão de obra, com a squad no papel de
@@ -122,6 +130,36 @@ docker build -f Dockerfile.sandbox -t squad-sandbox:latest .
 
 Sem Docker, use `TEST_RUNNER=host` — os testes passam a rodar direto na sua
 máquina, **sem jaula**.
+
+## Pentest da entrega (opcional)
+
+Testes verdes provam que o código funciona; não provam que ele resiste a
+ataque. Com `PENTEST_HABILITADO=1`, depois da revisão aprovada, um nó
+determinístico sobe a entrega como servidor e a ataca de verdade. Requer duas
+imagens, construídas uma vez:
+
+```bash
+docker build -f Dockerfile.target  -t squad-target:latest  .
+docker build -f Dockerfile.pentest -t squad-pentest:latest .
+```
+
+O `Dockerfile.pentest` baixa e **pina** o toolset (nuclei, nikto, sqlmap, ffuf)
+e os templates do nuclei no build — em runtime nada se atualiza. O `atacar.sh`
+em `docker/` orquestra as ferramentas contra o alvo e grava os relatórios.
+
+O sandbox de ataque é isolado por execução: alvo e atacante rodam numa rede
+Docker `--internal` (sem rota para a internet), ambos não-root e com limites de
+CPU/memória; a entrega é montada read-only e escreve só em `tmpfs`. O alvo é
+código gerado por LLM e o atacante é uma caixa de ferramentas ofensivas —
+nenhum dos dois pode ter egress. É o `--network none` do pytest aplicado à
+fronteira externa.
+
+Para o nó saber subir a entrega, o executor grava `.squad/run.json` com o
+comando de subida, a porta e um caminho de health. Um achado com severidade
+`>= PENTEST_SEVERIDADE_BLOQUEIO` (padrão `high`) reabre o laço de
+desenvolvimento com um brief de correção, com orçamento próprio (`MAX_PENTEST`);
+ao estourar, o gate humano decide com o relatório em mãos. Detalhes e causa raiz
+em [docs/RESILIENCIA.md](docs/RESILIENCIA.md), item 34.
 
 Para publicar as entregas aprovadas, configure `DEPLOY_REPO=owner/repo` no
 `.env` (repositório GitHub de entregas; cada execução vira uma branch

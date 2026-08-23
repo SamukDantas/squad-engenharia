@@ -25,6 +25,7 @@ sequenceDiagram
     participant WS as Workspace (workspace/thread_id)
     participant PT as pytest em sandbox Docker (sem rede, timeout 120s)
     participant R as Crew Revisão (revisor LLM)
+    participant PN as Pentest em sandbox isolado (rede --internal, sem egress)
     participant DP as Deploy
 
     U->>G: python main.py "pedido"
@@ -73,7 +74,14 @@ sequenceDiagram
             G->>R: kickoff(codigo, spec, saida_testes, revisao_anterior)
             R-->>G: bloqueantes + sugestões + veredito APROVADO/REPROVADO
             alt APROVADO (verdes E aprovado)
-                Note over G: sai do laço → gate humano
+                Note over G,PN: segue para o pentest (se PENTEST_HABILITADO=1)
+                G->>PN: sobe a entrega em sandbox isolado e ataca (nó sem LLM)
+                PN-->>G: pentest_ok + vulnerabilidades por severidade
+                alt sem vuln bloqueante
+                    Note over G: sai do laço → gate humano
+                else vuln >= piso de severidade
+                    Note over G,D: feedback_qa = brief de correção das vulns<br/>volta ao desenvolvimento e daí direto ao pytest<br/>(2ª reprova: teto de pentest → gate humano com relatório)
+                end
             else REPROVADO (só apontamento bloqueante reprova)
                 Note over G,D: feedback_qa = apontamentos da revisão<br/>volta ao desenvolvimento e daí direto ao pytest<br/>(2ª reprova: teto de opinião → gate humano)
             end
@@ -104,7 +112,8 @@ sequenceDiagram
 4. **Dois níveis de decisão no laço**: primeiro o exit code (vermelho volta
    ao desenvolvimento com o stack trace real, sem gastar token de revisão);
    só com verde o revisor roda. Aprovação automática = testes verdes **E**
-   revisão aprovada.
+   revisão aprovada **E** (quando `PENTEST_HABILITADO=1`) pentest sem vuln
+   bloqueante — segurança também por execução, não só opinião do revisor.
 5. **Separação entre implementar e validar**: quem escreve o código não
    escreve os testes — o executor é proibido de tocar em `tests/`.
 6. **Quem vigia os testes**: verdes não provam correção se a suíte for fraca.

@@ -1082,6 +1082,73 @@ adicionar.
 
 ---
 
+## 34. Segurança que era só opinião
+
+**Sintoma:** nenhuma falha — uma lacuna. O `revisor_codigo` lista "falha de
+segurança explorável" como um dos três motivos de reprova bloqueante, e o
+pipeline fechava com isso. Mas o revisor **lê o código**; ele não sobe a
+entrega, não manda uma requisição, não testa uma injeção. Todas as outras
+camadas que decidem roteamento haviam migrado de opinião para execução — o
+pytest é o exemplo — e a segurança ficou para trás, sendo julgada exatamente do
+jeito que o item 7 e o próprio princípio do projeto dizem para não confiar:
+pela palavra de um LLM.
+
+**Causa raiz:** não é um bug, é uma camada que faltava. Segurança compartilhava
+o veredito do revisor (LLM, sem ferramentas, [`qualidade.py`](../src/squad/crews/qualidade.py))
+com legibilidade e aderência, e portanto herdava as duas fraquezas dele: é
+opinião, e divide um orçamento de rodadas com apontamentos de estilo. Uma SQLi
+real e uma preferência de nomenclatura entravam pela mesma porta e custavam do
+mesmo bolso.
+
+Havia um motivo para ter ficado assim: a contraparte de execução é cara e
+perigosa. Atacar a entrega de verdade exige subir código não confiável **em
+rede** — o oposto do `--network none` que a Fase 6 estabeleceu para o pytest
+(item 21). Foi o mesmo requisito que fez a squad **rejeitar** o TestSprite: ele
+mandava o código para a nuvem e exigia rede aberta.
+
+**Solução:** um nó determinístico de pentest ([`pentest.py`](../src/squad/pentest.py)),
+espelho do `sandbox.py`, que sobe a entrega como servidor e a ataca com um
+toolset ofensivo (nuclei, nikto, sqlmap, ffuf). O veredito vem do ataque, não de
+opinião: achado com severidade `>=` piso reabre o laço de desenvolvimento com um
+brief de correção determinístico, com orçamento próprio (`MAX_PENTEST`, pela
+mesma razão de `MAX_REVISOES` — sinal caro não consome o orçamento do barato).
+
+A tensão com o TestSprite se resolve na fronteira da rede. O que tornava aquilo
+inaceitável não era "usar rede", era **egress**: código saindo da máquina, alvo
+na nuvem de terceiros. Aqui alvo e atacante rodam numa bridge Docker
+`--internal` — eles se falam, mas não há gateway para a internet. Nada sai. É o
+mesmo princípio de contenção do `--network none`, movido de "nenhuma rede" para
+"nenhuma rota externa": o pytest não precisa de rede nenhuma, o pentest precisa
+de uma rede fechada. Os templates do nuclei, que precisariam de internet para
+atualizar, são pinados no *build* (que tem rede) e nunca no *run*.
+
+Sobrou um problema que o pytest não tem: **o alvo precisa subir**, e o comando
+varia entre entregas (`uvicorn main:app`, `flask --app app run`, portas
+diferentes). Adivinhar pelo README em prosa é frágil. A saída seguiu o padrão
+do item 10 (artefato que decide roteamento não depende de contexto implícito): o
+executor **declara** o entrypoint em `.squad/run.json`, e o nó lê. Faltando o
+arquivo ou não subindo o alvo, o nó falha alto nomeando a causa — como o guard
+de entrega vazia (item 28), é falha de configuração, não veredito de segurança.
+
+Nasce desligado (`PENTEST_HABILITADO=0`): exige duas imagens Docker que pesam, e
+ligar uma camada de execução nova sem medir primeiro é o erro que o item 30 já
+documentou. O nó existe sempre no grafo e curto-circuita com veredito verde
+quando desligado, então a forma do grafo é estável e a squad roda como antes até
+a camada ser validada numa execução real.
+
+**Princípio:** **a régua da execução vale para toda decisão de roteamento, não
+só as baratas.** O projeto migrou de opinião para execução onde era barato
+(pytest, cobertura) e deixou a segurança na opinião porque a execução era cara e
+arriscada. Mas "caro e arriscado" é argumento para **conter**, não para não
+fazer: a mesma engenharia de jaula que deixou o pytest rodar código hostil com
+segurança (sandbox efêmero, sem privilégio, limites) deixa o pentest atacá-lo
+com segurança (rede fechada, read-only, tmpfs). E a fronteira que separa o
+aceitável do inaceitável raramente é a categoria da ação ("usar rede", "atacar")
+— é uma propriedade específica dela ("egress"), que dá para conter sem abrir mão
+da capacidade.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
@@ -1094,7 +1161,9 @@ Camada 4 — Piso de cobertura    (barato, determinístico) → pega teste que n
             agregado + por módulo                        → e o módulo que a média esconde
 Camada 5 — Revisor LLM          (caro, automático)       → pega o que passa nos testes
             só bloqueante reprova, com memória do veredito anterior
-Camada 6 — Gate humano          (manual)                 → segura ação irreversível
+Camada 6 — Pentest na jaula     (caro, determinístico)   → pega vuln que só o ataque revela
+            rede interna sem egress, orçamento próprio (opt-in)
+Camada 7 — Gate humano          (manual)                 → segura ação irreversível
 Transversal — Checkpoints SQLite + circuit breakers + parsers tolerantes
             + confinamento de ferramentas ao workspace + sandbox sem rede
             + métricas por execução + retry de falha transitória

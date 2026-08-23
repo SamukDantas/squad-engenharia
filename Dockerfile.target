@@ -1,0 +1,26 @@
+# Ambiente onde a entrega vira servidor vivo, para o nó de pentest atacá-la
+# (Fase 8). É o Dockerfile.sandbox + uvicorn: o sandbox só roda pytest e não
+# precisa de servidor ASGI, mas o alvo do pentest precisa subir a app FastAPI.
+#
+# Mantenha o conjunto de libs em sincronia com Dockerfile.sandbox e
+# requirements.txt (ambiente pré-provisionado do código gerado).
+#
+# Build (uma vez):
+#   docker build -f Dockerfile.target -t squad-target:latest .
+FROM python:3.12-slim
+
+RUN pip install --no-cache-dir \
+    fastapi==0.121.2 \
+    httpx==0.28.1 \
+    flask==3.1.2 \
+    requests==2.32.5 \
+    uvicorn==0.38.0
+
+# Sem privilégio: nem para servir a entrega o código gerado roda como root.
+RUN useradd --create-home --uid 1000 target
+USER target
+
+# WORKDIR após o USER: /app fica do target, então o `cp -r /src /app/projeto`
+# (feito no run) tem onde escrever a cópia gravável — a entrega no host é
+# montada read-only e nunca é tocada.
+WORKDIR /app
