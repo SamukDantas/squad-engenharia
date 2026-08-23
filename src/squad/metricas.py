@@ -118,6 +118,16 @@ def resumo(thread_id: str) -> str:
             + " → ".join("APROVADO" if r.get("aprovado") else "REPROVADO"
                          for r in revisoes)
         )
+    pentests = _dos("pentest")
+    if pentests:
+        linhas.append(
+            "  Pentest (execução ofensiva) : "
+            + " → ".join(
+                ("verde" if p.get("pentest_ok") else "vermelho")
+                + f"/{p.get('vulns_bloqueantes', 0)}bloq"
+                for p in pentests
+            )
+        )
     total = sum(e.get("duracao_s", 0) for e in eventos)
     linhas.append(f"  Tempo total nos nós         : {total:.0f}s")
 

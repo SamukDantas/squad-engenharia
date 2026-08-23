@@ -21,9 +21,12 @@ class EstadoProjeto(TypedDict, total=False):
     relatorio_qa: str    # saída do revisor de código
     revisao_anterior: str    # relatório da revisão anterior (memória entre rodadas)
     feedback_qa: str     # correções pedidas quando reprovado (stack trace ou revisão)
-    origem_feedback: str # quem motivou a rodada: "testes" | "revisao" | ""
+    origem_feedback: str # quem motivou a rodada: "testes" | "revisao" | "pentest" | ""
     aprovado: bool       # veredito do revisor
     tentativas: int      # contador do laço de correções
     revisao_tentativas: int  # contador só das reprovações de revisão
+    pentest_ok: bool     # veredito de execução: nenhuma vuln >= piso de bloqueio
+    vulnerabilidades: list[dict]  # achados do pentest (ferramenta, endpoint, severidade)
+    pentest_tentativas: int  # contador só das reprovações de pentest
     deploy_ok: bool      # resultado do nó de deploy
     deploy_ref: str      # onde a entrega foi publicada (repo@branch ou commit local)

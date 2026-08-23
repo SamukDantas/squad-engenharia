@@ -1,0 +1,9 @@
+# Arquivos que rodam DENTRO de containers Linux precisam de LF: um CRLF no
+# shebang (\r\n) faz o kernel procurar o interpretador "/bin/sh\r" e falhar.
+# Sem isto, core.autocrlf=true no Windows quebraria o script de ataque e os
+# RUN dos Dockerfiles ao serem checados out.
+*.sh            text eol=lf
+Dockerfile*     text eol=lf
+# A wordlist é lida pelo ffuf dentro do container: um CRLF viraria `admin\r` na
+# fuzzing e mandaria requisições erradas.
+docker/**       text eol=lf

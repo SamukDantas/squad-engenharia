@@ -31,6 +31,7 @@ from ..deploy import executar_deploy
 from ..llm import zen_llm
 from ..metricas import medir
 from ..opencode import executar_opencode
+from ..pentest import executar_pentest, habilitado as pentest_habilitado
 from ..resiliencia import com_retry
 from ..sandbox import executar_testes
 from .state import EstadoProjeto
@@ -39,6 +40,7 @@ MAX_TENTATIVAS = 3
 MAX_REPLANEJAMENTOS = 2
 MAX_TESTES = 2                # reescritas da suíte por rodada de desenvolvimento
 MAX_REVISOES = 2              # rodadas que a opinião do revisor pode custar
+MAX_PENTEST = 2              # rodadas que uma reprovação de pentest pode custar
 LIMITE_DUMP_CODIGO = 15_000   # chars de código injetados na tarefa do revisor
 LIMITE_AMOSTRA_TESTES = 20_000  # chars da suíte mostrados ao guard de critérios
 LIMITE_REVISAO_ANTERIOR = 4_000  # chars do veredito anterior devolvidos ao revisor
@@ -425,14 +427,50 @@ def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     }
 
 
+def no_pentest(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
+    """Veredito por execução ofensiva: sobe a entrega e a ataca num sandbox
+    isolado. Espelha o no_executar_testes — pytest prova que o código funciona;
+    o pentest prova que ele não é trivialmente explorável.
+
+    Roda uma vez por convergência (testes verdes + revisão aprovada), não dentro
+    do laço barato: é o nó de execução mais caro. Desligado por padrão
+    (PENTEST_HABILITADO), curto-circuita com veredito verde para não mudar o
+    comportamento de quem ainda não construiu as imagens."""
+    thread_id = _tid(config)
+    if not pentest_habilitado():
+        print(">>> Pentest desligado (PENTEST_HABILITADO=0) — pulando.")
+        return {"pentest_ok": True, "vulnerabilidades": []}
+
+    with medir(thread_id, "pentest") as m:
+        resultado = executar_pentest(state["workspace"], thread_id)
+        vulns = resultado["vulnerabilidades"]
+        m.update(
+            pentest_ok=resultado["pentest_ok"],
+            vulns_total=len(vulns),
+            vulns_bloqueantes=resultado["bloqueantes"],
+        )
+
+    aprovado = resultado["pentest_ok"]
+    return {
+        "pentest_ok": aprovado,
+        "vulnerabilidades": vulns,
+        "pentest_tentativas": state.get("pentest_tentativas", 0) + (0 if aprovado else 1),
+        "origem_feedback": "" if aprovado else "pentest",
+        "feedback_qa": "" if aprovado else resultado["feedback_seguranca"],
+    }
+
+
 def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
     """Gate human-in-the-loop: pausa a execução até um humano decidir."""
+    vulns = state.get("vulnerabilidades") or []
     resposta = interrupt(
         {
             "mensagem": "Autorizar deploy?",
             "testes_ok": state.get("testes_ok", False),
             "cobertura": state.get("cobertura", 0.0),
             "testes_aderentes": state.get("testes_aderentes", False),
+            "pentest_ok": state.get("pentest_ok", False),
+            "vulnerabilidades": len(vulns),
             "relatorio_qa": state.get("relatorio_qa", ""),
         }
     )
@@ -659,8 +697,14 @@ def rota_pos_desenvolvimento(state: EstadoProjeto) -> str:
     trace; se adicionar código sem teste, o piso de cobertura devolve ao QA.
     """
     tem_suite = any(a.startswith("tests/") for a in state.get("arquivos", []))
-    if state.get("origem_feedback") == "revisao" and tem_suite:
-        print(">>> Correção de revisão: suíte preservada, indo direto ao pytest.")
+    # Revisão e pentest reprovam código, não suíte: a correção muda o código,
+    # então os testes precisam rodar de novo, não ser reescritos. O mesmo
+    # raciocínio vale para os dois — vão direto ao pytest, que reancora o laço.
+    if state.get("origem_feedback") in {"revisao", "pentest"} and tem_suite:
+        print(
+            f">>> Correção de {state['origem_feedback']}: suíte preservada, "
+            "indo direto ao pytest."
+        )
         return "executar_testes"
     return "escrever_testes"
 
@@ -699,12 +743,37 @@ def rota_pos_revisao(state: EstadoProjeto) -> str:
     reservadas ao sinal barato e determinístico (pytest vermelho). Ao estourar,
     o gate humano decide — com o relatório em mãos.
     """
+    # Aprovado pela revisão, o próximo juiz é a execução ofensiva — não o gate
+    # humano direto. Testes verdes e revisão limpa não provam que a entrega
+    # resiste a ataque.
     if state.get("aprovado"):
-        return "aprovacao_humana"
+        return "pentest"
     if state.get("revisao_tentativas", 0) >= MAX_REVISOES:
         print(
             f">>> Revisão reprovou {MAX_REVISOES}x: teto de rodadas por opinião "
             "atingido, levando ao gate humano."
+        )
+        return "aprovacao_humana"
+    if state["tentativas"] >= MAX_TENTATIVAS:
+        return "aprovacao_humana"
+    return "desenvolvimento"
+
+
+def rota_pos_pentest(state: EstadoProjeto) -> str:
+    """Teto próprio para o pentest, pela mesma razão do teto da revisão: o sinal
+    mais caro não pode consumir sozinho o orçamento compartilhado com o pytest.
+
+    Bloqueante e com orçamento — volta ao desenvolvimento com o brief de
+    correção. Sem orçamento (de pentest ou do laço geral), o gate humano decide,
+    com o relatório de vulnerabilidades em mãos: pode haver falha explorável que
+    a auto-remediação não fechou, e publicar às cegas é o pior caminho.
+    """
+    if state.get("pentest_ok"):
+        return "aprovacao_humana"
+    if state.get("pentest_tentativas", 0) >= MAX_PENTEST:
+        print(
+            f">>> Pentest reprovou {MAX_PENTEST}x: teto de remediações atingido, "
+            "levando ao gate humano com o relatório."
         )
         return "aprovacao_humana"
     if state["tentativas"] >= MAX_TENTATIVAS:
@@ -725,6 +794,7 @@ def construir_grafo():
     g.add_node("validacao_testes", no_validacao_testes)
     g.add_node("executar_testes", no_executar_testes)
     g.add_node("revisao", no_revisao)
+    g.add_node("pentest", no_pentest)
     g.add_node("aprovacao_humana", no_aprovacao_humana)
     g.add_node("deploy", no_deploy)
 
@@ -737,6 +807,7 @@ def construir_grafo():
     g.add_conditional_edges("validacao_testes", rota_pos_validacao_testes)
     g.add_conditional_edges("executar_testes", rota_pos_testes)
     g.add_conditional_edges("revisao", rota_pos_revisao)
+    g.add_conditional_edges("pentest", rota_pos_pentest)
     g.add_edge("aprovacao_humana", "deploy")
     g.add_edge("deploy", END)
 

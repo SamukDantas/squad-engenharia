@@ -201,6 +201,13 @@ def _instrucoes(spec: str, feedback_qa: str) -> str:
         "diretório `.squad/`.\n"
         "- NÃO crie scripts para rodar os testes (`run_tests.py` e afins): a "
         "suíte é executada pelo próprio pipeline.\n"
+        "- Escreva `.squad/run.json` declarando como subir a aplicação como "
+        "servidor HTTP, para o pipeline de segurança atacá-la. Formato exato:\n"
+        '  `{\"cmd\": [\"uvicorn\", \"main:app\", \"--host\", \"0.0.0.0\", '
+        '\"--port\", \"8000\"], \"port\": 8000, \"health_path\": \"/docs\"}`\n'
+        "  Use o comando real desta entrega (o módulo/porta corretos; Flask usa "
+        "`flask --app <mod> run --host 0.0.0.0 --port <p>`). `health_path` é uma "
+        "rota que responde com a app no ar (ex.: `/docs`, `/health`, `/`).\n"
         "- Mantenha o escopo estritamente na especificação.\n\n"
         "## Especificação\n\n"
         f"{spec}\n"
