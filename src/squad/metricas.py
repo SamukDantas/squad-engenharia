@@ -121,6 +121,16 @@ def resumo(thread_id: str) -> str:
     total = sum(e.get("duracao_s", 0) for e in eventos)
     linhas.append(f"  Tempo total nos nós         : {total:.0f}s")
 
+    # Contexto injetado nos nós que falam com o LLM: é o que se paga por token,
+    # e o único jeito de comparar duas execuções depois de mexer nos limites.
+    contexto = sum(e.get("chars_contexto", 0) for e in eventos)
+    if contexto:
+        maior = max(eventos, key=lambda e: e.get("chars_contexto", 0))
+        linhas.append(
+            f"  Contexto enviado ao LLM     : {contexto:,} chars"
+            f" (maior: {maior['evento']} {maior.get('chars_contexto', 0):,})"
+        )
+
     caro = sorted(eventos, key=lambda e: e.get("duracao_s", 0), reverse=True)[:3]
     if caro:
         linhas.append(

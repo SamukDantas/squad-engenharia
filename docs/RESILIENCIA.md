@@ -1002,6 +1002,86 @@ por continuar passando que ninguém percebe que parou de medir.
 
 ---
 
+## 33. O teto que não era teto, e o revisor que julgava por amostra
+
+**Sintoma:** nenhum, de novo. O revisor aprovava e reprovava normalmente, os
+testes rodavam, o grafo fechava. A auditoria só apareceu ao medir o que cada nó
+manda para o LLM, nas 14 entregas já em disco:
+
+```
+LIMITE_DUMP_CODIGO = 15.000
+dump real em 126d542c → 43.918 chars   (193% acima do teto declarado)
+dump truncado em      → 10 de 14 entregas (71%)
+arquivo onde o corte caiu → tests/*, em 8 dos 11 casos
+```
+
+E dentro do dump, lido como texto e enviado ao modelo: `tarefas.db` (12.303
+chars) e `tasks.db` (16.397) — SQLite binário, 56% do dump de uma das entregas.
+
+**Causa raiz:** três defeitos empilhados na mesma função, `_dump_codigo`.
+
+O primeiro é de ordem: o laço acrescentava o bloco e **depois** conferia o
+total. Um arquivo grande passava inteiro, então o teto não limitava nada — só
+avisava, tarde, que já tinha sido ultrapassado.
+
+O segundo é de fila: `sorted()` põe `tests/` por último, então o corte sempre
+caía na suíte. O revisor recebia o código e perdia os testes, sem que o texto
+dissesse quais arquivos faltavam. Ele julgava por amostra sem saber que era
+amostra — exatamente a falha que `_amostra_testes` já descrevia na própria
+docstring e já tinha corrigido, três funções abaixo, para o guard de critérios.
+A correção existia no arquivo e não tinha sido aplicada ao vizinho.
+
+O terceiro é de filtro: `_arquivos_do_workspace` só exclui `.pyc`. Qualquer
+binário que a entrega gere — e uma API com persistência gera — ia como texto
+para o contexto, gastando orçamento e devolvendo ruído.
+
+**Solução:** `_blocos_com_orcamento`, uma função só, usada pelo dump do revisor
+e pela amostra do guard. O orçamento é conferido **antes** de acrescentar, e
+cabeçalho de bloco, separador e marcador de truncagem saem dele — reservar só o
+conteúdo deixaria o total estourar em silêncio de novo, que era o defeito
+original. A repartição é água em copos: os arquivos entram em ordem crescente
+de tamanho, cada um leva no máximo a sua cota, e o que sobra dos pequenos é
+redividido entre os grandes. O manifesto lista **todos** os nomes, inclusive os
+que entraram truncados, para que ninguém confunda ausência com omissão. Fonte
+antes de teste na fila, porque o revisor já recebe `saida_testes` em separado.
+E os binários são cortados **na fronteira do LLM**, não na varredura do
+workspace: eles são entrega e continuam indo ao deploy.
+
+Medido sobre as mesmas 14 entregas:
+
+| | antes | depois |
+|---|---:|---:|
+| agregado dos dumps | 279.061 chars | **179.385** (−36%) |
+| pior caso (`126d542c`) | 43.918 | **14.999** (−66%) |
+| entregas acima do teto | 11 | **0** |
+| arquivos invisíveis ao revisor | até 8 por rodada | **0** |
+
+**A decisão de não adotar ferramenta externa vem daqui.** A alternativa
+avaliada era plugar um compressor de contexto (Headroom) como proxy — o
+`base_url` de [`llm.py`](../src/squad/llm.py) já é uma variável de ambiente, e
+custaria zero linha. A medição matou a ideia: o proxy alcançaria as superfícies
+do CrewAI, que são **29%** dos tokens da execução (o executor OpenCode é os
+outros 71%), e a taxa que a ferramenta declara para agentes de código é 15–20%
+— **5% do custo total**, meio centavo por execução, em troca de um daemon cuja
+queda derruba toda chamada de LLM e de um `output shaper` que encurta a
+conclusão do modelo justamente onde `_veredito_aprovado` procura o veredito
+(item 7). Consertar os três defeitos acima cortou 36% do mesmo blob, de graça.
+Pelo mesmo motivo ficaram de fora um indexador de grafo de código (ganho
+declarado para 500+ arquivos; as entregas têm de 1 a 22) e um serviço de E2E na
+nuvem (exigiria expor a entrega em rede, invertendo o `--network none` do
+item 21).
+
+**Princípio:** **limite que não é conferido antes de gastar não é limite, é
+comentário.** E quando o corte precisa acontecer, *o que* se corta é decisão de
+projeto tanto quanto *quanto*: truncar pelo total delega a escolha à ordem
+alfabética, que não sabe nada sobre o que importa, e o custo aparece como
+julgamento de pior qualidade — não como erro. Antes de comprar redução de
+contexto de fora, vale medir o que o próprio código já desperdiça: aqui a
+gordura era maior que o ganho da ferramenta, e removê-la tirou risco em vez de
+adicionar.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
