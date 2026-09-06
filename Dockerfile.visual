@@ -1,0 +1,48 @@
+# Jaula de renderização da entrega (Fase 9).
+#
+# O revisor LLM lê o CSS e o pytest não pinta pixel: nenhum dos dois vê que uma
+# página com `color:` e sem `background:` some no tema escuro do sistema. Esta
+# imagem carrega um Chromium de verdade para medir o contraste que aparece na
+# tela — o mesmo princípio do sandbox do pytest e do pentest, aplicado ao que
+# só existe depois do layout.
+#
+# Roda com --network none: a entrega é HTML gerado por LLM, e abrir HTML de
+# terceiro num navegador é executar código de terceiro. As páginas são abertas
+# por file://, então nada aqui precisa de rede.
+#
+# Build (uma vez):
+#   docker build -f Dockerfile.visual -t squad-visual:latest .
+FROM python:3.12-slim
+
+# Versão fixa: navegador que muda sozinho muda o veredito sozinho, e um piso de
+# contraste que oscila entre execuções não serve de guard.
+RUN pip install --no-cache-dir playwright==1.49.1
+
+# Libs de sistema do Chromium, declaradas à mão. `playwright install --with-deps`
+# não serve aqui: ele assume Ubuntu e pede ttf-unifont/ttf-ubuntu-font-family,
+# que não existem no Debian 12 — e aborta a instalação inteira do navegador.
+# fonts-liberation entra para o texto ter métricas reais: fonte ausente muda o
+# tamanho renderizado, e o piso de contraste depende de distinguir texto grande.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+    libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 \
+    fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+# O caminho do navegador é definido ANTES de instalar, e o dono é ajustado na
+# mesma camada. Instalar como root em /root/.cache e mover depois não encolhe
+# nada: camada é aditiva, e o Chromium ficaria duas vezes na imagem.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN useradd --create-home --uid 1000 render \
+    && playwright install chromium \
+    && chown -R render:render /opt/ms-playwright
+
+COPY docker/verificar_visual.py /opt/verificar_visual.py
+
+# Nem dentro da jaula o conteúdo gerado é renderizado como root.
+USER render
+WORKDIR /entrega
+
+ENTRYPOINT ["python", "/opt/verificar_visual.py"]
+CMD ["/entrega"]

@@ -30,6 +30,7 @@ VEREDITO_DO_NO = {
     "executar_testes": "testes_ok",
     "revisao": "aprovado",
     "pentest": "pentest_ok",
+    "visual": "visual_ok",
     "deploy": "deploy_ok",
 }
 

@@ -34,6 +34,7 @@ from ..opencode import executar_opencode
 from ..pentest import executar_pentest, habilitado as pentest_habilitado
 from ..resiliencia import com_retry
 from ..sandbox import executar_testes
+from ..visual import executar_visual, habilitado as visual_habilitado
 from .state import EstadoProjeto
 
 MAX_TENTATIVAS = 3
@@ -41,6 +42,7 @@ MAX_REPLANEJAMENTOS = 2
 MAX_TESTES = 2                # reescritas da suíte por rodada de desenvolvimento
 MAX_REVISOES = 2              # rodadas que a opinião do revisor pode custar
 MAX_PENTEST = 2              # rodadas que uma reprovação de pentest pode custar
+MAX_VISUAL = 2               # rodadas que uma reprovação de renderização pode custar
 LIMITE_DUMP_CODIGO = 15_000   # chars de código injetados na tarefa do revisor
 LIMITE_AMOSTRA_TESTES = 20_000  # chars da suíte mostrados ao guard de critérios
 LIMITE_REVISAO_ANTERIOR = 4_000  # chars do veredito anterior devolvidos ao revisor
@@ -365,6 +367,7 @@ def no_triagem(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
         "tentativas": 0,
         "testes_tentativas": 0,
         "revisao_tentativas": 0,
+        "visual_tentativas": 0,
         "origem_feedback": "",
         "workspace": str(workspace.resolve()),
     }
@@ -461,6 +464,42 @@ def no_pentest(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     }
 
 
+def no_visual(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
+    """Terceira camada de veredito por execução: renderiza a entrega e mede o
+    contraste do que aparece na tela.
+
+    Espelha o no_pentest. O pytest prova que funciona, o pentest que não é
+    trivialmente explorável, este que é legível. Cobre a classe de defeito que
+    escapa das outras duas por construção: o revisor LLM lê a cor do texto e não
+    sabe o que aparece atrás, e o pytest não pinta pixel.
+
+    Roda depois do pentest, no fim da convergência, pelo mesmo motivo que ele:
+    é execução cara e não pertence ao laço barato. Desligado por padrão
+    (VISUAL_HABILITADO), curto-circuita verde para não mudar o comportamento de
+    quem ainda não construiu a imagem."""
+    thread_id = _tid(config)
+    if not visual_habilitado():
+        print(">>> Verificação visual desligada (VISUAL_HABILITADO=0) — pulando.")
+        return {"visual_ok": True, "problemas_visuais": []}
+
+    with medir(thread_id, "visual") as m:
+        resultado = executar_visual(state["workspace"], thread_id)
+        m.update(
+            visual_ok=resultado["visual_ok"],
+            problemas=len(resultado["problemas"]),
+            paginas=resultado["paginas"],
+        )
+
+    aprovado = resultado["visual_ok"]
+    return {
+        "visual_ok": aprovado,
+        "problemas_visuais": resultado["problemas"],
+        "visual_tentativas": state.get("visual_tentativas", 0) + (0 if aprovado else 1),
+        "origem_feedback": "" if aprovado else "visual",
+        "feedback_qa": "" if aprovado else resultado["feedback_visual"],
+    }
+
+
 def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
     """Gate human-in-the-loop: pausa a execução até um humano decidir."""
     vulns = state.get("vulnerabilidades") or []
@@ -472,6 +511,8 @@ def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
             "testes_aderentes": state.get("testes_aderentes", False),
             "pentest_ok": state.get("pentest_ok", False),
             "vulnerabilidades": len(vulns),
+            "visual_ok": state.get("visual_ok", False),
+            "problemas_visuais": len(state.get("problemas_visuais") or []),
             "relatorio_qa": state.get("relatorio_qa", ""),
         }
     )
@@ -720,7 +761,7 @@ def rota_pos_desenvolvimento(state: EstadoProjeto) -> str:
     # Revisão e pentest reprovam código, não suíte: a correção muda o código,
     # então os testes precisam rodar de novo, não ser reescritos. O mesmo
     # raciocínio vale para os dois — vão direto ao pytest, que reancora o laço.
-    if state.get("origem_feedback") in {"revisao", "pentest"} and tem_suite:
+    if state.get("origem_feedback") in {"revisao", "pentest", "visual"} and tem_suite:
         print(
             f">>> Correção de {state['origem_feedback']}: suíte preservada, "
             "indo direto ao pytest."
@@ -793,12 +834,34 @@ def rota_pos_pentest(state: EstadoProjeto) -> str:
     a auto-remediação não fechou, e publicar às cegas é o pior caminho.
     """
     if state.get("pentest_ok"):
-        return "aprovacao_humana"
+        return "visual"
     if state.get("pentest_tentativas", 0) >= MAX_PENTEST:
         _registrar_teto(state, "pentest", MAX_PENTEST)
         print(
             f">>> Pentest reprovou {MAX_PENTEST}x: teto de remediações atingido, "
             "levando ao gate humano com o relatório."
+        )
+        return "aprovacao_humana"
+    if state["tentativas"] >= MAX_TENTATIVAS:
+        _registrar_teto(state, "correcao", MAX_TENTATIVAS)
+        return "aprovacao_humana"
+    return "desenvolvimento"
+
+
+def rota_pos_visual(state: EstadoProjeto) -> str:
+    """Teto próprio, pela mesma razão do teto do pentest: o sinal caro não pode
+    consumir sozinho o orçamento compartilhado com o pytest.
+
+    Ao estourar, o gate humano decide com os achados em mãos — contraste
+    insuficiente é defeito real, mas não é motivo para queimar a execução
+    inteira em rodadas de CSS."""
+    if state.get("visual_ok"):
+        return "aprovacao_humana"
+    if state.get("visual_tentativas", 0) >= MAX_VISUAL:
+        _registrar_teto(state, "visual", MAX_VISUAL)
+        print(
+            f">>> Visual reprovou {MAX_VISUAL}x: teto de correções atingido, "
+            "levando ao gate humano com os achados."
         )
         return "aprovacao_humana"
     if state["tentativas"] >= MAX_TENTATIVAS:
@@ -821,6 +884,7 @@ def construir_grafo():
     g.add_node("executar_testes", no_executar_testes)
     g.add_node("revisao", no_revisao)
     g.add_node("pentest", no_pentest)
+    g.add_node("visual", no_visual)
     g.add_node("aprovacao_humana", no_aprovacao_humana)
     g.add_node("deploy", no_deploy)
 
@@ -834,6 +898,7 @@ def construir_grafo():
     g.add_conditional_edges("executar_testes", rota_pos_testes)
     g.add_conditional_edges("revisao", rota_pos_revisao)
     g.add_conditional_edges("pentest", rota_pos_pentest)
+    g.add_conditional_edges("visual", rota_pos_visual)
     g.add_edge("aprovacao_humana", "deploy")
     g.add_edge("deploy", END)
 

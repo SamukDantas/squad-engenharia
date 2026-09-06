@@ -29,5 +29,8 @@ class EstadoProjeto(TypedDict, total=False):
     pentest_ok: bool     # veredito de execução: nenhuma vuln >= piso de bloqueio
     vulnerabilidades: list[dict]  # achados do pentest (ferramenta, endpoint, severidade)
     pentest_tentativas: int  # contador só das reprovações de pentest
+    visual_ok: bool      # veredito de execução: entrega legível nos dois temas
+    problemas_visuais: list[dict]  # achados da renderização (arquivo, tema, razão)
+    visual_tentativas: int   # contador só das reprovações de verificação visual
     deploy_ok: bool      # resultado do nó de deploy
     deploy_ref: str      # onde a entrega foi publicada (repo@branch ou commit local)

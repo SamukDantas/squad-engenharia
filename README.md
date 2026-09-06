@@ -7,8 +7,8 @@ usando **LangGraph** como orquestrador (estado, checkpoints, gates humanos) e
 ## Arquitetura
 
 ```
-Triagem → Planejamento → Guard aderência → Desenvolvimento → Testes → pytest → Revisão → Pentest → Aprovação humana → Deploy
-              ↑__↻ spec incoerente (máx. 2)_|   ↑___↻ testes vermelhos (máx. 3) / revisão reprovada (máx. 2) / vuln bloqueante (máx. 2)___↻_|
+Triagem → Planejamento → Guard aderência → Desenvolvimento → Testes → pytest → Revisão → Pentest → Visual → Aprovação humana → Deploy
+              ↑__↻ spec incoerente (máx. 2)_|   ↑___↻ testes vermelhos (máx. 3) / revisão reprovada (máx. 2) / vuln bloqueante (máx. 2) / contraste reprovado (máx. 2)___↻_|
 ```
 
 Princípio central: **vereditos vêm de execução, não de opinião**. O executor
@@ -25,6 +25,16 @@ ofensivo (nuclei, nikto, sqlmap, ffuf). Vulnerabilidade acima do piso de
 severidade reabre o laço de desenvolvimento com um brief de correção, com
 orçamento próprio; abaixo do piso, informa o gate humano. É a mesma régua do
 pytest — veredito por ataque real — aplicada à segurança.
+
+O que se **vê** também tem camada de execução. Com `VISUAL_HABILITADO=1`, um
+nó determinístico abre cada página da entrega num Chromium headless isolado
+(`--network none`), uma vez por tema do sistema, e mede o contraste real entre
+cada texto e o fundo que aparece atrás dele. Abaixo do piso WCAG AA, a rodada
+volta ao desenvolvimento com as razões medidas. É a classe de defeito que as
+outras camadas não alcançam por construção: o revisor LLM lê `color: #1f2937` e
+não sabe o que aparece atrás, e o pytest não pinta pixel — uma entrega real da
+squad passou por 42 testes verdes e por um revisor que aprovou, estando
+ilegível no tema escuro (1,28:1 medido, exigido 4,5:1).
 
 O nó de desenvolvimento é **intercambiável** (`DEV_EXECUTOR`): por padrão usa
 o **OpenCode CLI** em modo headless como mão de obra, com a squad no papel de
@@ -57,6 +67,7 @@ squad-engenharia/
     ├── tools.py                # ferramentas de arquivo confinadas ao workspace
     ├── opencode.py             # executor de desenvolvimento via OpenCode CLI
     ├── sandbox.py              # jaula de execução dos testes (Docker/host)
+    ├── visual.py               # renderiza a entrega e mede contraste (Docker)
     ├── metricas.py             # métricas por execução (metrics/<thread_id>.json)
     ├── painel.py               # painel read-only sobre metrics/ (servidor + agregação)
     ├── painel.html             # as três telas do painel (sem build, sem CDN)
@@ -132,6 +143,31 @@ docker build -f Dockerfile.sandbox -t squad-sandbox:latest .
 
 Sem Docker, use `TEST_RUNNER=host` — os testes passam a rodar direto na sua
 máquina, **sem jaula**.
+
+## Verificação visual da entrega (opcional)
+
+Ligue com `VISUAL_HABILITADO=1` e construa a imagem uma vez:
+
+```bash
+docker build -f Dockerfile.visual -t squad-visual:latest .
+```
+
+O nó abre cada `.html` da entrega num Chromium headless com `--network none`,
+duas vezes por página (`prefers-color-scheme` claro e escuro), e mede o
+contraste de cada texto contra o fundo efetivo — subindo a árvore até achar um
+`background-color` opaco. Abaixo do piso WCAG AA (4,5:1 para texto normal, 3:1
+para texto grande), o achado vira item de um brief de correção determinístico e
+a rodada volta ao desenvolvimento, com orçamento próprio (`MAX_VISUAL`).
+
+Há uma checagem de causa raiz separada: página que não declara
+`background-color` no `body` nem na raiz herda o canvas do navegador e inverte
+junto com o tema do sistema enquanto as cores de texto ficam paradas. É o
+defeito exato que motivou o nó.
+
+**Escopo:** renderiza a entrega **estática**. O que só aparece depois de um
+`fetch` (linhas de tabela, gráficos com dados) não é medido — sem rede, o fetch
+não completa. Cobre o esqueleto da página, que é onde mora o defeito de tema e
+contraste. Não substitui olho humano em layout. Entrega sem HTML passa direto.
 
 ## Painel de métricas
 

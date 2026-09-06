@@ -138,6 +138,17 @@ def resumo(thread_id: str) -> str:
                 for p in pentests
             )
         )
+    visuais = _dos("visual")
+    if visuais:
+        linhas.append(
+            "  Verificação visual          : "
+            + " → ".join(
+                ("verde" if v.get("visual_ok") else "vermelho")
+                + f"/{v.get('problemas', 0)}achados"
+                for v in visuais
+            )
+        )
+
     tetos = _dos("teto_atingido")
     if tetos:
         linhas.append(
