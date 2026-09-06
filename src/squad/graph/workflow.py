@@ -28,6 +28,9 @@ from ..crews.desenvolvimento import crew_desenvolvimento
 from ..crews.planejamento import crew_planejamento
 from ..crews.qualidade import crew_revisao, crew_testes
 from ..deploy import executar_deploy
+from ..dominio import guards, orcamento, rotas
+from ..dominio.rotas import e_teste_padrao
+from ..dominio.vereditos import veredito_aprovado, veredito_sim
 from ..llm import zen_llm
 from ..metricas import medir, registrar
 from ..opencode import executar_opencode
@@ -37,12 +40,15 @@ from ..sandbox import executar_testes
 from ..visual import executar_visual, habilitado as visual_habilitado
 from .state import EstadoProjeto
 
-MAX_TENTATIVAS = 3
-MAX_REPLANEJAMENTOS = 2
-MAX_TESTES = 2                # reescritas da suíte por rodada de desenvolvimento
-MAX_REVISOES = 2              # rodadas que a opinião do revisor pode custar
-MAX_PENTEST = 2              # rodadas que uma reprovação de pentest pode custar
-MAX_VISUAL = 2               # rodadas que uma reprovação de renderização pode custar
+# Os tetos de rodada moram no domínio, junto das decisões que os aplicam.
+# Reexportados aqui porque nós e mensagens ainda os citam.
+MAX_TENTATIVAS = rotas.MAX_TENTATIVAS
+MAX_REPLANEJAMENTOS = rotas.MAX_REPLANEJAMENTOS
+MAX_TESTES = rotas.MAX_TESTES
+MAX_REVISOES = rotas.MAX_REVISOES
+MAX_PENTEST = rotas.MAX_PENTEST
+MAX_VISUAL = rotas.MAX_VISUAL
+
 LIMITE_DUMP_CODIGO = 15_000   # chars de código injetados na tarefa do revisor
 LIMITE_AMOSTRA_TESTES = 20_000  # chars da suíte mostrados ao guard de critérios
 LIMITE_REVISAO_ANTERIOR = 4_000  # chars do veredito anterior devolvidos ao revisor
@@ -67,45 +73,6 @@ def _cobertura_minima_modulo() -> float:
 
 def _tid(config: RunnableConfig) -> str:
     return str(config["configurable"]["thread_id"])
-
-
-def _veredito_sim(resposta: object) -> bool:
-    """Parser tolerante de SIM/NAO (RESILIENCIA.md, item 7): modelos enfeitam
-    a resposta, e o caso indecifrável conta como reprova."""
-    normalizado = str(resposta).strip().upper()
-    return normalizado.startswith("SIM") or (
-        "SIM" in normalizado[:20]
-        and "NAO" not in normalizado[:20]
-        and "NÃO" not in normalizado[:20]
-    )
-
-
-# Linhas finais examinadas em busca do veredito da revisão.
-LINHAS_VEREDITO = 8
-
-
-def _veredito_aprovado(texto: str) -> bool:
-    """Procura APROVADO/REPROVADO nas últimas linhas, não só na última.
-
-    Exigir o token na última linha é acoplar roteamento ao formato exato da
-    saída (o que o item 7 do RESILIENCIA.md proíbe): um revisor que escreve
-    "**APROVADO**" e fecha com um parágrafo de conclusão tinha a aprovação
-    lida como reprova — custando uma rodada inteira do laço.
-
-    Vale o **último** veredito encontrado, porque o texto discute
-    apontamentos antes de concluir. Nada reconhecível conta como reprova.
-    """
-    if not texto:
-        return False
-    linhas = [ln for ln in texto.upper().splitlines() if ln.strip()]
-    for linha in reversed(linhas[-LINHAS_VEREDITO:]):
-        # REPROVADO primeiro: "APROVADO" não é substring dele, mas a ordem
-        # deixa a precedência explícita para quem lê.
-        if "REPROVADO" in linha:
-            return False
-        if "APROVADO" in linha:
-            return True
-    return False
 
 
 # ---------- helpers de workspace ----------
@@ -153,48 +120,11 @@ def _tem_conteudo(workspace: str, rel: str) -> bool:
 
 
 def _conferir_entrega(arquivos: list[str], workspace: str) -> None:
-    """Guard de entrega vazia: o nó de desenvolvimento não pode concluir sem
-    ter produzido nada.
-
-    O executor é externo e sinaliza sucesso pelo exit code, que classifica o
-    processo — não o trabalho. Medido duas vezes em execução real: o OpenCode
-    CLI abortou (permissão negada numa rodada, saldo insuficiente na outra),
-    saiu com 0, e a squad seguiu pagando 855s de QA, dois guards de critérios
-    e um pytest em cima de um workspace vazio, ainda entrando em outra rodada
-    de desenvolvimento.
-
-    Falha alto em vez de rotear de volta: não há o que corrigir sem código, e
-    a causa é sempre de configuração (modelo sem tool calling, credencial,
-    permissão) — repetir a mesma rodada só repete a mesma falha (item 26). O
-    checkpoint preserva o progresso: `main.py --thread <id>` retoma.
-
-    Arquivos em `tests/` não contam como entrega: são do QA, e o executor é
-    proibido de tocá-los. Arquivo **vazio** também não: a primeira versão
-    deste guard contava qualquer caminho fora de `tests/`, e o mesmo executor
-    que não escreveu nada numa rodada deixou um `app/__init__.py` de 0 bytes
-    na seguinte — estrutura sem conteúdo, que teria passado batido. Existir
-    arquivo não é existir trabalho, e o critério é o mesmo que `_cobertura`
-    já usa ao ignorar módulo sem instruções.
-    """
-    entregues = [
-        a for a in arquivos
-        if not a.startswith("tests/") and _tem_conteudo(workspace, a)
-    ]
-    if entregues:
-        return
-    if not arquivos:
-        achado = "nada"
-    elif all(a.startswith("tests/") for a in arquivos):
-        achado = f"apenas {len(arquivos)} arquivo(s) de teste"
-    else:
-        achado = f"{len(arquivos)} arquivo(s), todos vazios ou só de teste"
-    raise RuntimeError(
-        f"O executor de desenvolvimento concluiu sem escrever a entrega: {achado} "
-        f"em {workspace}. Exit code 0 não prova trabalho feito — confira se o "
-        "modelo do executor suporta tool calling, se as credenciais têm saldo e "
-        "se a saída acima registra permissão negada. Nada a corrigir sem código: "
-        "o grafo para aqui em vez de pagar QA e pytest em cima do vazio."
-    )
+    """Lê o disco, monta o manifesto e deixa o domínio julgar."""
+    manifesto = {a: _tem_conteudo(workspace, a) for a in arquivos}
+    falha = guards.conferir_entrega(manifesto, workspace, e_teste_padrao)
+    if falha:
+        raise RuntimeError(falha)
 
 
 def _impressao_entrega(workspace: str) -> dict[str, str]:
@@ -207,7 +137,7 @@ def _impressao_entrega(workspace: str) -> dict[str, str]:
     raiz = Path(workspace)
     impressao: dict[str, str] = {}
     for rel in _arquivos_do_workspace(workspace):
-        if rel.startswith("tests/"):
+        if e_teste_padrao(rel):
             continue
         try:
             impressao[rel] = hashlib.sha256((raiz / rel).read_bytes()).hexdigest()
@@ -217,102 +147,22 @@ def _impressao_entrega(workspace: str) -> dict[str, str]:
 
 
 def _conferir_correcao(antes: dict[str, str], depois: dict[str, str], origem: str) -> None:
-    """Guard de rodada de correção: corrigir sem mudar nada não é corrigir.
-
-    O guard de entrega vazia cobre a rodada **inicial** — se não há arquivo, o
-    executor não trabalhou. Numa rodada de correção ele não cobre nada: o
-    workspace já está cheio da rodada anterior, e um executor que ignorou o
-    feedback por completo passa como nó concluído.
-
-    Medido na thread `ac0c7d4e` (agendador de tarefas): o revisor reprovou por
-    uma condição de corrida entre cancelamento e execução, a rodada de correção
-    rodou 109,5s, **não escreveu um único arquivo**, o pytest seguinte devolveu
-    cobertura idêntica ao dígito e a segunda revisão repetiu o apontamento
-    palavra por palavra — porque o código era o mesmo. O orçamento de revisões
-    acabou ali, sem que nenhuma tentativa de conserto tivesse existido.
-
-    Falha alto, como o item 28: repetir a rodada que não mudou nada tende a não
-    mudar nada de novo, e a causa costuma ser de configuração ou de feedback
-    que o executor não conseguiu acionar. O checkpoint preserva tudo.
-    """
-    if antes != depois:
-        return
-    raise RuntimeError(
-        f"A rodada de correção (origem: {origem}) terminou sem alterar a entrega: "
-        f"{len(depois)} arquivo(s), todos byte a byte idênticos aos de antes. "
-        "O executor recebeu o feedback e não o acionou — repetir a rodada tende "
-        "a repetir o resultado, e o veredito seguinte vai reproduzir o mesmo "
-        "apontamento sobre o mesmo código. Confira se o feedback chegou "
-        "acionável ao executor e se o modelo suporta tool calling. O checkpoint "
-        "preserva o progresso: `main.py --thread <id>` retoma."
-    )
-
-
-# Extensões cujo conteúdo não é texto de revisar. Binário lido com
-# `errors="replace"` vira ruído no contexto do LLM sem informar nada: medido nas
-# entregas já existentes, `tarefas.db` (12.303 chars) e `tasks.db` (16.397)
-# foram enviados inteiros ao revisor — 56% do dump de uma delas. A varredura do
-# workspace continua vendo esses arquivos (eles são entrega e vão ao deploy);
-# o corte é só no que se manda para o modelo.
-_EXTENSOES_BINARIAS = {
-    ".db", ".sqlite", ".sqlite3", ".png", ".jpg", ".jpeg", ".gif", ".webp",
-    ".ico", ".svg", ".pdf", ".zip", ".gz", ".tar", ".whl", ".so", ".dll",
-    ".exe", ".bin", ".pickle", ".pkl",
-}
-
-
-def _e_binario(rel: str) -> bool:
-    return Path(rel).suffix.lower() in _EXTENSOES_BINARIAS
+    falha = guards.conferir_correcao(antes, depois, origem)
+    if falha:
+        raise RuntimeError(falha)
 
 
 def _blocos_com_orcamento(
     workspace: str, arquivos: list[str], limite: int, rotulo: str
 ) -> str:
-    """Concatena arquivos dentro de um teto, **repartindo** o orçamento.
-
-    Truncar pelo total (os primeiros N chars) faz quem lê julgar por amostra sem
-    saber: os arquivos no fim da fila ficam invisíveis. Aqui cada arquivo tem
-    cota, o que sobra de arquivo pequeno é redistribuído aos grandes (fila em
-    ordem crescente de tamanho), e o manifesto lista todos os nomes — inclusive
-    os que entraram truncados, para que ninguém confunda ausência com omissão.
-    """
+    """Lê os arquivos e entrega ao domínio, que reparte o orçamento."""
     if not arquivos:
         return ""
-
     conteudos = {
         rel: (Path(workspace) / rel).read_text(encoding="utf-8", errors="replace")
         for rel in arquivos
     }
-    manifesto = "\n".join(f"- {a}" for a in arquivos)
-    cabecalho = f"{rotulo} ({len(arquivos)}):\n{manifesto}\n\n"
-
-    # O teto vale para o texto inteiro, então cabeçalho de bloco e separador
-    # saem do orçamento antes de ele ser repartido: reservar só o conteúdo
-    # deixaria o total estourar em silêncio de novo, que é o defeito original.
-    moldura = {rel: len(f"### {rel}\n") + 1 for rel in arquivos}
-    saldo = max(limite - len(cabecalho) - sum(moldura.values()), 0)
-
-    # Água em copos: o menor primeiro leva só o que precisa, e o saldo restante
-    # é redividido entre os que ainda não tiveram vez.
-    fila = sorted(arquivos, key=lambda rel: len(conteudos[rel]))
-    cotas: dict[str, int] = {}
-    for i, rel in enumerate(fila):
-        cotas[rel] = min(len(conteudos[rel]), saldo // (len(fila) - i))
-        saldo -= cotas[rel]
-
-    partes = []
-    for rel in arquivos:
-        conteudo = conteudos[rel]
-        if len(conteudo) > cotas[rel]:
-            # O marcador também ocupa a cota: sem descontá-lo, cada arquivo
-            # truncado devolveria mais texto do que lhe foi orçado.
-            marcador = (
-                f"\n[... {rel} truncado aqui "
-                f"({len(conteudo)} chars no total) ...]"
-            )
-            conteudo = conteudo[:max(cotas[rel] - len(marcador), 0)] + marcador
-        partes.append(f"### {rel}\n{conteudo}")
-    return cabecalho + "\n".join(partes)
+    return orcamento.blocos_com_orcamento(conteudos, arquivos, limite, rotulo)
 
 
 def _dump_codigo(workspace: str, arquivos: list[str]) -> str:
@@ -332,18 +182,19 @@ def _dump_codigo(workspace: str, arquivos: list[str]) -> str:
     fila do manifesto: o revisor já recebe `saida_testes` em separado, então
     perder trecho de teste custa menos que perder o módulo que a spec descreve.
     """
-    revisaveis = [a for a in arquivos if not _e_binario(a)]
-    fonte = [a for a in revisaveis if not a.startswith("tests/")]
-    testes = [a for a in revisaveis if a.startswith("tests/")]
+    ordem = orcamento.ordenar_para_dump(arquivos, e_teste_padrao)
     return _blocos_com_orcamento(
-        workspace, fonte + testes, LIMITE_DUMP_CODIGO, "Arquivos da entrega"
+        workspace, ordem, LIMITE_DUMP_CODIGO, "Arquivos da entrega"
     )
 
 
 def _amostra_testes(workspace: str, arquivos: list[str]) -> str:
     """Amostra da suíte para o guard de critérios, com **todos** os arquivos
     representados — senão ele reprova por não ver testes que existem."""
-    testes = [a for a in arquivos if a.startswith("tests/") and not _e_binario(a)]
+    testes = [
+        a for a in arquivos
+        if e_teste_padrao(a) and not orcamento.e_binario(a)
+    ]
     return _blocos_com_orcamento(
         workspace, testes, LIMITE_AMOSTRA_TESTES, "Arquivos de teste na suíte"
     )
@@ -568,7 +419,7 @@ def no_validacao_spec(state: EstadoProjeto, config: RunnableConfig) -> EstadoPro
             " — mesmo assunto e mesmo escopo, sem substituí-lo por outro tema?\n\n"
             f"Especificação:\n{state['spec'][:8000]}"
         ))
-        coerente = _veredito_sim(veredito)
+        coerente = veredito_sim(veredito)
         m.update(spec_coerente=coerente)
     if not coerente:
         print(f">>> Guard: spec reprovada (não adere ao pedido). Veredito: {str(veredito)[:40]}")
@@ -663,7 +514,7 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
             f"\n\nEspecificação:\n{state['spec'][:6000]}"
             f"\n\nTestes:\n{testes}"
         ))
-        aderentes = _veredito_sim(veredito)
+        aderentes = veredito_sim(veredito)
         m.update(testes_aderentes=aderentes)
 
     if not aderentes:
@@ -706,7 +557,7 @@ def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
             }
         ), caro=True)
         texto = resultado.raw
-        aprovado = _veredito_aprovado(texto)
+        aprovado = veredito_aprovado(texto)
         m.update(aprovado=aprovado)
     return {
         "relatorio_qa": texto,
@@ -740,144 +591,48 @@ def _registrar_teto(state: EstadoProjeto, laco: str, limite: int) -> None:
     )
 
 
+def _aplicar(state: EstadoProjeto, decisao: rotas.Decisao) -> str:
+    """Traduz a decisão do domínio em efeito, na ordem que sempre valeu:
+    registrar o teto, imprimir o aviso, levantar o erro.
+
+    As rotas abaixo existem só para o grafo ter nomes estáveis a que se ligar —
+    a decisão em si mora em `dominio/rotas.py`, e é lá que ela é testada.
+    """
+    if decisao.teto:
+        _registrar_teto(state, decisao.teto.laco, decisao.teto.limite)
+    if decisao.aviso:
+        print(decisao.aviso)
+    if decisao.erro:
+        raise RuntimeError(decisao.erro)
+    return decisao.destino
+
+
 def rota_pos_validacao_spec(state: EstadoProjeto) -> str:
-    if state.get("spec_coerente"):
-        return "desenvolvimento"
-    if state.get("spec_tentativas", 0) > MAX_REPLANEJAMENTOS:
-        _registrar_teto(state, "planejamento", MAX_REPLANEJAMENTOS)
-        raise RuntimeError(
-            "Planejamento produziu specs incoerentes com o pedido "
-            f"{MAX_REPLANEJAMENTOS + 1} vezes seguidas. Interrompendo para "
-            "evitar desperdício de tokens — revise o modelo ou o prompt."
-        )
-    return "planejamento"
+    return _aplicar(state, rotas.pos_validacao_spec(state))
 
 
 def rota_pos_desenvolvimento(state: EstadoProjeto) -> str:
-    """Roteamento seletivo: a rodada nascida de reprovação de revisão não
-    reescreve a suíte.
-
-    O código mudou, então os testes precisam *rodar* de novo — não ser
-    *escritos* de novo. `escrever_testes` é o nó mais caro do grafo (8 min
-    medidos), e repagá-lo por um apontamento de legibilidade foi metade do
-    custo da execução que motivou esta mudança. Ir direto ao pytest também
-    pula o guard de critérios, que julgaria uma suíte inalterada.
-
-    As redes já existentes cobrem o risco: se a correção quebrar a suíte, o
-    pytest fica vermelho e a rodada volta ao desenvolvimento com o stack
-    trace; se adicionar código sem teste, o piso de cobertura devolve ao QA.
-    """
-    tem_suite = any(a.startswith("tests/") for a in state.get("arquivos", []))
-    # Revisão e pentest reprovam código, não suíte: a correção muda o código,
-    # então os testes precisam rodar de novo, não ser reescritos. O mesmo
-    # raciocínio vale para os dois — vão direto ao pytest, que reancora o laço.
-    if state.get("origem_feedback") in {"revisao", "pentest", "visual"} and tem_suite:
-        print(
-            f">>> Correção de {state['origem_feedback']}: suíte preservada, "
-            "indo direto ao pytest."
-        )
-        return "executar_testes"
-    return "escrever_testes"
+    return _aplicar(state, rotas.pos_desenvolvimento(state, e_teste_padrao))
 
 
 def rota_pos_validacao_testes(state: EstadoProjeto) -> str:
-    """Suíte que não adere aos critérios volta para o QA reescrever. Ao
-    estourar o teto, segue mesmo assim: qualidade de teste é sinal mais
-    brando que teste vermelho, e fica registrado no estado para o gate
-    humano e as métricas."""
-    if state.get("testes_aderentes"):
-        return "executar_testes"
-    if state.get("testes_tentativas", 0) >= MAX_TESTES:
-        _registrar_teto(state, "escrever_testes", MAX_TESTES)
-        print(">>> Guard de critérios: teto de reescritas atingido, seguindo assim mesmo.")
-        return "executar_testes"
-    return "escrever_testes"
+    return _aplicar(state, rotas.pos_validacao_testes(state))
 
 
 def rota_pos_testes(state: EstadoProjeto) -> str:
-    if not state.get("testes_ok"):
-        if state["tentativas"] >= MAX_TENTATIVAS:
-            # Circuit breaker: humano decide o que fazer com o trabalho reprovado.
-            _registrar_teto(state, "correcao", MAX_TENTATIVAS)
-            return "aprovacao_humana"
-        return "desenvolvimento"
-    # Verdes, mas sem exercitar a entrega: problema do teste — laço curto,
-    # só o QA reescreve, sem pagar outra rodada de desenvolvimento.
-    if not state.get("cobertura_ok") and state.get("testes_tentativas", 0) < MAX_TESTES:
-        return "escrever_testes"
-    return "revisao"
+    return _aplicar(state, rotas.pos_testes(state))
 
 
 def rota_pos_revisao(state: EstadoProjeto) -> str:
-    """Teto próprio para a opinião do revisor.
-
-    `tentativas` é orçamento compartilhado com falha de teste. Sem um teto
-    separado, o sinal caro e subjetivo (revisão) consome sozinho as rodadas
-    reservadas ao sinal barato e determinístico (pytest vermelho). Ao estourar,
-    o gate humano decide — com o relatório em mãos.
-    """
-    # Aprovado pela revisão, o próximo juiz é a execução ofensiva — não o gate
-    # humano direto. Testes verdes e revisão limpa não provam que a entrega
-    # resiste a ataque.
-    if state.get("aprovado"):
-        return "pentest"
-    if state.get("revisao_tentativas", 0) >= MAX_REVISOES:
-        _registrar_teto(state, "revisao", MAX_REVISOES)
-        print(
-            f">>> Revisão reprovou {MAX_REVISOES}x: teto de rodadas por opinião "
-            "atingido, levando ao gate humano."
-        )
-        return "aprovacao_humana"
-    if state["tentativas"] >= MAX_TENTATIVAS:
-        _registrar_teto(state, "correcao", MAX_TENTATIVAS)
-        return "aprovacao_humana"
-    return "desenvolvimento"
+    return _aplicar(state, rotas.pos_revisao(state))
 
 
 def rota_pos_pentest(state: EstadoProjeto) -> str:
-    """Teto próprio para o pentest, pela mesma razão do teto da revisão: o sinal
-    mais caro não pode consumir sozinho o orçamento compartilhado com o pytest.
-
-    Bloqueante e com orçamento — volta ao desenvolvimento com o brief de
-    correção. Sem orçamento (de pentest ou do laço geral), o gate humano decide,
-    com o relatório de vulnerabilidades em mãos: pode haver falha explorável que
-    a auto-remediação não fechou, e publicar às cegas é o pior caminho.
-    """
-    if state.get("pentest_ok"):
-        return "visual"
-    if state.get("pentest_tentativas", 0) >= MAX_PENTEST:
-        _registrar_teto(state, "pentest", MAX_PENTEST)
-        print(
-            f">>> Pentest reprovou {MAX_PENTEST}x: teto de remediações atingido, "
-            "levando ao gate humano com o relatório."
-        )
-        return "aprovacao_humana"
-    if state["tentativas"] >= MAX_TENTATIVAS:
-        _registrar_teto(state, "correcao", MAX_TENTATIVAS)
-        return "aprovacao_humana"
-    return "desenvolvimento"
+    return _aplicar(state, rotas.pos_pentest(state))
 
 
 def rota_pos_visual(state: EstadoProjeto) -> str:
-    """Teto próprio, pela mesma razão do teto do pentest: o sinal caro não pode
-    consumir sozinho o orçamento compartilhado com o pytest.
-
-    Ao estourar, o gate humano decide com os achados em mãos — contraste
-    insuficiente é defeito real, mas não é motivo para queimar a execução
-    inteira em rodadas de CSS."""
-    if state.get("visual_ok"):
-        return "aprovacao_humana"
-    if state.get("visual_tentativas", 0) >= MAX_VISUAL:
-        _registrar_teto(state, "visual", MAX_VISUAL)
-        print(
-            f">>> Visual reprovou {MAX_VISUAL}x: teto de correções atingido, "
-            "levando ao gate humano com os achados."
-        )
-        return "aprovacao_humana"
-    if state["tentativas"] >= MAX_TENTATIVAS:
-        _registrar_teto(state, "correcao", MAX_TENTATIVAS)
-        return "aprovacao_humana"
-    return "desenvolvimento"
+    return _aplicar(state, rotas.pos_visual(state))
 
 
 # ---------- montagem do grafo ----------

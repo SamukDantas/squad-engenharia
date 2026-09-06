@@ -58,12 +58,19 @@ com erro explícito.
 squad-engenharia/
 ├── main.py                     # ponto de entrada
 ├── requirements.txt            # deps da squad + ambiente pré-provisionado p/ código gerado
+├── pytest.ini                  # a suíte da squad é só tests/, nunca as entregas
+├── tests/                      # testes do domínio (rotas, guards, vereditos, orçamento)
 ├── .env.example
 ├── workspace/<thread_id>/      # entrega real de cada execução (gitignored)
 └── src/squad/
     ├── config/
     │   ├── agents.yaml         # definição dos agentes (papéis, goals, backstories)
     │   └── tasks.yaml          # definição das tarefas de cada crew
+    ├── dominio/                # as decisões, sem nenhuma tecnologia
+    │   ├── rotas.py            # para onde ir depois de cada nó, e os tetos
+    │   ├── guards.py           # entrega vazia e rodada que não corrigiu nada
+    │   ├── vereditos.py        # leitura de SIM/NAO e APROVADO/REPROVADO
+    │   └── orcamento.py        # repartição do contexto enviado ao LLM
     ├── tools.py                # ferramentas de arquivo confinadas ao workspace
     ├── opencode.py             # executor de desenvolvimento via OpenCode CLI
     ├── sandbox.py              # jaula de execução dos testes (Docker/host)
@@ -168,6 +175,28 @@ defeito exato que motivou o nó.
 `fetch` (linhas de tabela, gráficos com dados) não é medido — sem rede, o fetch
 não completa. Cobre o esqueleto da página, que é onde mora o defeito de tema e
 contraste. Não substitui olho humano em layout. Entrega sem HTML passa direto.
+
+## Testes da squad
+
+O domínio — as decisões — mora em `src/squad/dominio/`, sem nenhum import de
+langgraph, crewai, docker ou pathlib. É o que sobrevive à troca de stack, de
+executor e de infraestrutura, e é o que dá para testar sem subir container nem
+gastar token:
+
+```bash
+pytest
+```
+
+A camada de fora (`graph/workflow.py`) lê disco, chama adaptadores e traduz o
+que o domínio devolve em efeito. As rotas, por exemplo, não registram métrica
+nem imprimem: devolvem uma `Decisao` com destino, teto e aviso, e o grafo aplica
+na ordem de sempre — registrar o teto, imprimir o aviso, levantar o erro.
+
+Os casos da suíte não são inventados: cada um fixa uma lição já paga em execução
+real e documentada no [RESILIENCIA.md](docs/RESILIENCIA.md) — o revisor que
+escrevia `**APROVADO**` e fechava com um parágrafo (item 27), o executor que
+deixou um arquivo de 0 bytes (item 28), a rodada de correção que não mudou um
+byte (item 32), o teto do dump que cortava sempre a suíte (item 33).
 
 ## Painel de métricas
 
