@@ -32,9 +32,13 @@
     text-transform: uppercase; color: var(--fraco); font-weight: 600;
   }
   /* O pedido do usuário mora dentro de um h2 e não deve herdar o caixa-alta:
-     é texto livre em português, não rótulo de seção. */
+     é texto livre em português, não rótulo de seção. Uma linha só — um pedido
+     com critérios de aceite tem parágrafos, e inteiro ele empurra a linha do
+     tempo para fora da tela. O texto completo fica no title. */
   h2 .normal {
     text-transform: none; letter-spacing: 0; color: var(--texto); font-weight: 400;
+    display: inline-block; max-width: 62ch; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
   }
   a { color: var(--azul); }
   button.voltar {
@@ -218,7 +222,7 @@ async function verExecucao(threadId) {
   const cabecalho = el("section", {}, [
     el("h2", {}, [
       el("button", { class: "voltar", text: "← todas", onclick: verHistorico }),
-      el("span", { class: "normal", text: `  ${d.pedido || threadId}  ` }),
+      el("span", { class: "normal", title: d.pedido || threadId, text: ` ${d.pedido || threadId} ` }),
       seloDesfecho(d.desfecho),
     ]),
     el("div", { class: "cartoes" }, [
@@ -368,7 +372,13 @@ function tabelaMarcos(d) {
         el("td", {}, el("span", {
           class: `selo ${m.evento === "teto_atingido" ? "ruim" : "neutro"}`, text: m.evento,
         })),
-        el("td", { text: Object.entries(m.detalhe).map(([k, v]) => `${k}=${v}`).join("  ") || "—" }),
+        // O detalhe do `inicio_execucao` carrega o pedido inteiro, que aqui
+        // ocuparia meia tela; a tabela existe para ser varrida, não lida.
+        el("td", {
+          class: "truncar",
+          title: Object.entries(m.detalhe).map(([k, v]) => `${k}=${v}`).join("\n"),
+          text: Object.entries(m.detalhe).map(([k, v]) => `${k}=${v}`).join("  ") || "—",
+        }),
       ])
     )),
   ]);

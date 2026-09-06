@@ -88,23 +88,32 @@ def _veredito(evento: dict) -> bool | None:
     return bool(valor) if valor is not None else None
 
 
-def _desfecho(fins: list[dict], inicios: list[dict], barras: list[dict]) -> str:
+def _desfecho(marcos: list[dict], barras: list[dict]) -> str:
     """Como a execução terminou, pela melhor evidência disponível.
 
-    `fim_execucao` é a resposta direta, mas só existe a partir da instrumentação
-    — e o histórico anterior é a maior parte do arquivo. Chamar tudo isso de
-    "em_curso" seria dizer que dezenove execuções de agosto ainda estão rodando,
-    e faria a taxa de conclusão do painel mentir logo na primeira tela.
+    O último `fim_execucao` não basta: uma thread atravessa vários processos, e
+    uma retomada **depois** de um fim ressuscita a execução. Medido numa
+    execução real — o planejamento morreu num 429, o `fim_execucao` gravou
+    `erro`, a chave foi trocada e a thread seguiu por mais meia hora; o painel
+    continuava anunciando `erro` sobre uma execução viva. Daí percorrer os
+    marcos em ordem em vez de olhar só o último de cada tipo.
 
-    Sem o marco, um nó de deploy concluído prova que a execução chegou ao fim;
-    sem nem isso, `em_curso` só vale se a execução foi instrumentada (tem
-    `inicio_execucao`). O resto é honestamente indeterminado.
+    Sem marco nenhum — o histórico anterior à instrumentação, que é a maior
+    parte do arquivo — um nó de deploy concluído ainda prova que a execução
+    chegou ao fim. O resto é honestamente indeterminado: chamar de "em_curso"
+    faria a taxa de conclusão mentir na primeira tela.
     """
-    if fins:
-        return fins[-1]["detalhe"].get("desfecho", "?")
+    estado = ""
+    for marco in marcos:
+        if marco["evento"] in {"inicio_execucao", "retomada"}:
+            estado = "em_curso"
+        elif marco["evento"] == "fim_execucao":
+            estado = marco["detalhe"].get("desfecho", "?")
+    if estado:
+        return estado
     if any(b["evento"] == "deploy" and not b["erro"] for b in barras):
         return "deploy"
-    return "em_curso" if inicios else "indeterminado"
+    return "indeterminado"
 
 
 def detalhar(diretorio: Path, thread_id: str) -> dict | None:
@@ -170,9 +179,8 @@ def detalhar(diretorio: Path, thread_id: str) -> dict | None:
             if r["origem"] not in {"preparacao", "inicial"}),
         1,
     )
-    fins = [m for m in marcos if m["evento"] == "fim_execucao"]
     inicios = [m for m in marcos if m["evento"] == "inicio_execucao"]
-    desfecho = _desfecho(fins, inicios, barras)
+    desfecho = _desfecho(marcos, barras)
 
     return {
         "thread_id": thread_id,
