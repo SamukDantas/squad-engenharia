@@ -22,9 +22,9 @@ ao mundo real supera cinco agentes conversando sobre ele.
 > workspace como camada adicional. Entregas são em **Python** (o pytest é o
 > juiz) e as dependências do código gerado vêm de um **ambiente
 > pré-provisionado** (requirements.txt e a imagem do sandbox) — sem pip
-> install em runtime. O deploy publica a entrega na branch
-> `entrega/<thread_id>` do repositório configurado em `DEPLOY_REPO` (sem a
-> variável, commit local apenas).
+> install em runtime. O deploy publica cada projeto num repositório próprio,
+> criado sob `DEPLOY_OWNER` se ainda não existir (sem a variável, commit local
+> apenas).
 
 ### Fase 1 — Workspace real por execução
 Uma pasta `workspace/<thread_id>/` onde o código vive como **arquivos**, não
@@ -54,11 +54,16 @@ O nó de deploy deixa de ser um `print` e executa `git commit` + `push` (ou
 build de container), atrás do mesmo gate humano.
 
 *Desenho implementado:* o workspace vira repositório git próprio; a entrega
-é commitada (com `.gitignore` para caches de execução) e publicada na branch
-`entrega/<thread_id>` do repositório alvo fixo (`DEPLOY_REPO=owner/repo` no
-`.env`). Sem `DEPLOY_REPO`, degrada para commit local com aviso. Falha de
-git (exit != 0 ou timeout) levanta erro explícito — o checkpoint preserva o
-progresso e `--thread` retoma reexecutando só o deploy.
+é commitada (com `.gitignore` para caches de execução) e publicada num
+repositório **do projeto**, `<DEPLOY_OWNER>/<slug do pedido>`, criado via `gh`
+se ainda não existir. Sem `DEPLOY_OWNER`, degrada para commit local com aviso.
+Falha de git ou gh (exit != 0 ou timeout) levanta erro explícito — o checkpoint
+preserva o progresso e `--thread` retoma reexecutando só o deploy.
+
+O alvo fixo anterior (`DEPLOY_REPO=owner/repo`, uma branch `entrega/<thread_id>`
+por execução) concentrava todas as entregas num ponto único de perda: quando o
+repositório foi apagado, as três entregas de agosto/2026 foram junto. O
+`DEPLOY_REPO` antigo ainda é aceito como fallback, lendo só o dono.
 
 ### Fase 5 — OpenCode como músculo
 O nó de desenvolvimento invoca o OpenCode CLI em modo headless

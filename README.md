@@ -199,9 +199,22 @@ desenvolvimento com um brief de correção, com orçamento próprio (`MAX_PENTES
 ao estourar, o gate humano decide com o relatório em mãos. Detalhes e causa raiz
 em [docs/RESILIENCIA.md](docs/RESILIENCIA.md), item 34.
 
-Para publicar as entregas aprovadas, configure `DEPLOY_REPO=owner/repo` no
-`.env` (repositório GitHub de entregas; cada execução vira uma branch
-`entrega/<thread_id>`). Sem a variável, o deploy commita apenas localmente.
+Para publicar as entregas aprovadas, configure `DEPLOY_OWNER=<conta>` no
+`.env`. **Um projeto, um repositório:** o deploy cria
+`<DEPLOY_OWNER>/<slug do pedido>` no GitHub se ele ainda não existir, e publica
+a entrega ali. Sem a variável, o deploy commita apenas localmente.
+
+O nome do repositório sai do pedido, não do `thread_id` — um UUID não diz nada
+a quem abre a lista de repositórios. A criação é idempotente: retomar a thread
+reexecuta o nó de deploy inteiro, e um repositório já criado é reaproveitado.
+Repositório novo recebe a entrega em `main`; repositório que já tem commits
+recebe em `entrega/<thread_id>`, porque cada execução tem workspace próprio e
+portanto histórico git sem ancestral comum.
+
+Requer o **GitHub CLI** (`gh`) autenticado, com a conta ativa sendo o
+`DEPLOY_OWNER` ou alguém que administre a org dona. Com mais de uma conta
+autenticada, os repositórios privados das outras são invisíveis e o erro que
+aparece é `Repository not found` — `gh auth switch --user <conta>` resolve.
 
 ## Documentação adicional
 
@@ -236,9 +249,9 @@ Para publicar as entregas aprovadas, configure `DEPLOY_REPO=owner/repo` no
   oscila entre duas versões sem convergir.
 - Cada execução grava `metrics/<thread_id>.json` com duração e veredito por nó,
   e imprime o resumo ao final — é o que permite comparar duas execuções.
-- O deploy é real: após o gate humano, a entrega é commitada e publicada na
-  branch `entrega/<thread_id>` do repo configurado em `DEPLOY_REPO` (sem a
-  variável, commit local no workspace apenas).
+- O deploy é real: após o gate humano, a entrega é commitada e publicada num
+  repositório próprio do projeto, criado em `DEPLOY_OWNER` se não existir (sem
+  a variável, commit local no workspace apenas).
 - O laço de correções tem limite de 3 tentativas, das quais no máximo 2 podem
   ser gastas por reprovação de revisão — ao estourar qualquer um dos dois, o
   gate humano decide o que fazer com o trabalho reprovado. O orçamento do sinal
