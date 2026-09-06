@@ -58,6 +58,8 @@ squad-engenharia/
     ├── opencode.py             # executor de desenvolvimento via OpenCode CLI
     ├── sandbox.py              # jaula de execução dos testes (Docker/host)
     ├── metricas.py             # métricas por execução (metrics/<thread_id>.json)
+    ├── painel.py               # painel read-only sobre metrics/ (servidor + agregação)
+    ├── painel.html             # as três telas do painel (sem build, sem CDN)
     ├── deploy.py               # deploy real (git commit + push da entrega)
     ├── crews/
     │   ├── planejamento.py     # analista + arquiteto
@@ -130,6 +132,42 @@ docker build -f Dockerfile.sandbox -t squad-sandbox:latest .
 
 Sem Docker, use `TEST_RUNNER=host` — os testes passam a rodar direto na sua
 máquina, **sem jaula**.
+
+## Painel de métricas
+
+Cada execução grava um histórico de eventos em `metrics/<thread_id>.json`, e o
+`main.py` imprime o resumo ao final. O painel lê os mesmos arquivos e mostra o
+que o resumo, olhando uma thread só, não consegue mostrar:
+
+```bash
+python -m src.squad.painel        # http://127.0.0.1:4949
+```
+
+Três telas:
+
+- **Série de execuções** — uma linha por thread: wall-clock, share de retrabalho,
+  rodadas, cobertura final, desfecho e tetos atingidos. É a tela que responde
+  "a mudança melhorou?", comparando execuções em vez de descrever uma.
+- **Linha do tempo** — uma faixa por nó no eixo do tempo real, colorida pelo
+  veredito, com separadores de rodada. Os vãos entre as barras são tempo **fora**
+  dos nós: gate humano, queda do provedor, retomada manual.
+- **Repartição por rodada** — quanto do tempo foi trabalho novo e quanto foi
+  retrabalho, separado pela origem que cobrou a rodada (testes, revisão, pentest).
+
+Read-only por construção: o escritor único de `metrics/` continua sendo o
+`metricas.py`, e o painel só abre arquivo para leitura. Serve execução viva
+(atualiza sozinho a cada 3s) e histórico antigo pelo mesmo caminho, porque a
+fonte é o disco e não o processo do grafo. Sobe só em `127.0.0.1` — não tem
+autenticação e expõe o pedido e os vereditos da execução.
+
+Sem servidor, o mesmo dado agregado sai em JSON:
+
+```bash
+python -m src.squad.painel --json <thread_id>
+```
+
+Execuções anteriores à instrumentação aparecem como `indeterminado`: elas não
+têm o marco de fim, e chamá-las de "em curso" faria a taxa de conclusão mentir.
 
 ## Pentest da entrega (opcional)
 
