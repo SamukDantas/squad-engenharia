@@ -7,8 +7,8 @@ usando **LangGraph** como orquestrador (estado, checkpoints, gates humanos) e
 ## Arquitetura
 
 ```
-Triagem → Planejamento → Guard aderência → Desenvolvimento → Testes → pytest → Revisão → Pentest → Aprovação humana → Deploy
-              ↑__↻ spec incoerente (máx. 2)_|   ↑___↻ testes vermelhos (máx. 3) / revisão reprovada (máx. 2) / vuln bloqueante (máx. 2)___↻_|
+Triagem → Planejamento → Guard aderência → Desenvolvimento → Testes → pytest → Revisão → Pentest → Visual → Aprovação humana → Deploy
+              ↑__↻ spec incoerente (máx. 2)_|   ↑___↻ testes vermelhos (máx. 3) / revisão reprovada (máx. 2) / vuln bloqueante (máx. 2) / contraste reprovado (máx. 2)___↻_|
 ```
 
 Princípio central: **vereditos vêm de execução, não de opinião**. O executor
@@ -25,6 +25,16 @@ ofensivo (nuclei, nikto, sqlmap, ffuf). Vulnerabilidade acima do piso de
 severidade reabre o laço de desenvolvimento com um brief de correção, com
 orçamento próprio; abaixo do piso, informa o gate humano. É a mesma régua do
 pytest — veredito por ataque real — aplicada à segurança.
+
+O que se **vê** também tem camada de execução. Com `VISUAL_HABILITADO=1`, um
+nó determinístico abre cada página da entrega num Chromium headless isolado
+(`--network none`), uma vez por tema do sistema, e mede o contraste real entre
+cada texto e o fundo que aparece atrás dele. Abaixo do piso WCAG AA, a rodada
+volta ao desenvolvimento com as razões medidas. É a classe de defeito que as
+outras camadas não alcançam por construção: o revisor LLM lê `color: #1f2937` e
+não sabe o que aparece atrás, e o pytest não pinta pixel — uma entrega real da
+squad passou por 42 testes verdes e por um revisor que aprovou, estando
+ilegível no tema escuro (1,28:1 medido, exigido 4,5:1).
 
 O nó de desenvolvimento é **intercambiável** (`DEV_EXECUTOR`): por padrão usa
 o **OpenCode CLI** em modo headless como mão de obra, com a squad no papel de
@@ -57,7 +67,10 @@ squad-engenharia/
     ├── tools.py                # ferramentas de arquivo confinadas ao workspace
     ├── opencode.py             # executor de desenvolvimento via OpenCode CLI
     ├── sandbox.py              # jaula de execução dos testes (Docker/host)
+    ├── visual.py               # renderiza a entrega e mede contraste (Docker)
     ├── metricas.py             # métricas por execução (metrics/<thread_id>.json)
+    ├── painel.py               # painel read-only sobre metrics/ (servidor + agregação)
+    ├── painel.html             # as três telas do painel (sem build, sem CDN)
     ├── deploy.py               # deploy real (git commit + push da entrega)
     ├── crews/
     │   ├── planejamento.py     # analista + arquiteto
@@ -131,6 +144,67 @@ docker build -f Dockerfile.sandbox -t squad-sandbox:latest .
 Sem Docker, use `TEST_RUNNER=host` — os testes passam a rodar direto na sua
 máquina, **sem jaula**.
 
+## Verificação visual da entrega (opcional)
+
+Ligue com `VISUAL_HABILITADO=1` e construa a imagem uma vez:
+
+```bash
+docker build -f Dockerfile.visual -t squad-visual:latest .
+```
+
+O nó abre cada `.html` da entrega num Chromium headless com `--network none`,
+duas vezes por página (`prefers-color-scheme` claro e escuro), e mede o
+contraste de cada texto contra o fundo efetivo — subindo a árvore até achar um
+`background-color` opaco. Abaixo do piso WCAG AA (4,5:1 para texto normal, 3:1
+para texto grande), o achado vira item de um brief de correção determinístico e
+a rodada volta ao desenvolvimento, com orçamento próprio (`MAX_VISUAL`).
+
+Há uma checagem de causa raiz separada: página que não declara
+`background-color` no `body` nem na raiz herda o canvas do navegador e inverte
+junto com o tema do sistema enquanto as cores de texto ficam paradas. É o
+defeito exato que motivou o nó.
+
+**Escopo:** renderiza a entrega **estática**. O que só aparece depois de um
+`fetch` (linhas de tabela, gráficos com dados) não é medido — sem rede, o fetch
+não completa. Cobre o esqueleto da página, que é onde mora o defeito de tema e
+contraste. Não substitui olho humano em layout. Entrega sem HTML passa direto.
+
+## Painel de métricas
+
+Cada execução grava um histórico de eventos em `metrics/<thread_id>.json`, e o
+`main.py` imprime o resumo ao final. O painel lê os mesmos arquivos e mostra o
+que o resumo, olhando uma thread só, não consegue mostrar:
+
+```bash
+python -m src.squad.painel        # http://127.0.0.1:4949
+```
+
+Três telas:
+
+- **Série de execuções** — uma linha por thread: wall-clock, share de retrabalho,
+  rodadas, cobertura final, desfecho e tetos atingidos. É a tela que responde
+  "a mudança melhorou?", comparando execuções em vez de descrever uma.
+- **Linha do tempo** — uma faixa por nó no eixo do tempo real, colorida pelo
+  veredito, com separadores de rodada. Os vãos entre as barras são tempo **fora**
+  dos nós: gate humano, queda do provedor, retomada manual.
+- **Repartição por rodada** — quanto do tempo foi trabalho novo e quanto foi
+  retrabalho, separado pela origem que cobrou a rodada (testes, revisão, pentest).
+
+Read-only por construção: o escritor único de `metrics/` continua sendo o
+`metricas.py`, e o painel só abre arquivo para leitura. Serve execução viva
+(atualiza sozinho a cada 3s) e histórico antigo pelo mesmo caminho, porque a
+fonte é o disco e não o processo do grafo. Sobe só em `127.0.0.1` — não tem
+autenticação e expõe o pedido e os vereditos da execução.
+
+Sem servidor, o mesmo dado agregado sai em JSON:
+
+```bash
+python -m src.squad.painel --json <thread_id>
+```
+
+Execuções anteriores à instrumentação aparecem como `indeterminado`: elas não
+têm o marco de fim, e chamá-las de "em curso" faria a taxa de conclusão mentir.
+
 ## Pentest da entrega (opcional)
 
 Testes verdes provam que o código funciona; não provam que ele resiste a
@@ -161,9 +235,22 @@ desenvolvimento com um brief de correção, com orçamento próprio (`MAX_PENTES
 ao estourar, o gate humano decide com o relatório em mãos. Detalhes e causa raiz
 em [docs/RESILIENCIA.md](docs/RESILIENCIA.md), item 34.
 
-Para publicar as entregas aprovadas, configure `DEPLOY_REPO=owner/repo` no
-`.env` (repositório GitHub de entregas; cada execução vira uma branch
-`entrega/<thread_id>`). Sem a variável, o deploy commita apenas localmente.
+Para publicar as entregas aprovadas, configure `DEPLOY_OWNER=<conta>` no
+`.env`. **Um projeto, um repositório:** o deploy cria
+`<DEPLOY_OWNER>/<slug do pedido>` no GitHub se ele ainda não existir, e publica
+a entrega ali. Sem a variável, o deploy commita apenas localmente.
+
+O nome do repositório sai do pedido, não do `thread_id` — um UUID não diz nada
+a quem abre a lista de repositórios. A criação é idempotente: retomar a thread
+reexecuta o nó de deploy inteiro, e um repositório já criado é reaproveitado.
+Repositório novo recebe a entrega em `main`; repositório que já tem commits
+recebe em `entrega/<thread_id>`, porque cada execução tem workspace próprio e
+portanto histórico git sem ancestral comum.
+
+Requer o **GitHub CLI** (`gh`) autenticado, com a conta ativa sendo o
+`DEPLOY_OWNER` ou alguém que administre a org dona. Com mais de uma conta
+autenticada, os repositórios privados das outras são invisíveis e o erro que
+aparece é `Repository not found` — `gh auth switch --user <conta>` resolve.
 
 ## Documentação adicional
 
@@ -198,9 +285,9 @@ Para publicar as entregas aprovadas, configure `DEPLOY_REPO=owner/repo` no
   oscila entre duas versões sem convergir.
 - Cada execução grava `metrics/<thread_id>.json` com duração e veredito por nó,
   e imprime o resumo ao final — é o que permite comparar duas execuções.
-- O deploy é real: após o gate humano, a entrega é commitada e publicada na
-  branch `entrega/<thread_id>` do repo configurado em `DEPLOY_REPO` (sem a
-  variável, commit local no workspace apenas).
+- O deploy é real: após o gate humano, a entrega é commitada e publicada num
+  repositório próprio do projeto, criado em `DEPLOY_OWNER` se não existir (sem
+  a variável, commit local no workspace apenas).
 - O laço de correções tem limite de 3 tentativas, das quais no máximo 2 podem
   ser gastas por reprovação de revisão — ao estourar qualquer um dos dois, o
   gate humano decide o que fazer com o trabalho reprovado. O orçamento do sinal

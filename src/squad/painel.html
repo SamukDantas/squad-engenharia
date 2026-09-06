@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel — squad de engenharia</title>
+<style>
+  :root {
+    --fundo: #fbfbfa; --papel: #fff; --borda: #e3e1dc; --texto: #1f1e1c;
+    --fraco: #6b6862; --verde: #1a7f37; --vermelho: #b8262f; --cinza: #8c8880;
+    --azul: #2b5cb8; --ambar: #b06a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fundo: #161513; --papel: #1e1d1a; --borda: #33312c; --texto: #ecebe8;
+      --fraco: #9a968e; --verde: #4ac26b; --vermelho: #e5606a; --cinza: #7d7a74;
+      --azul: #7aa2f7; --ambar: #d99a2b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--fundo); color: var(--texto);
+    font: 14px/1.5 ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, monospace;
+  }
+  header { padding: 18px 24px; border-bottom: 1px solid var(--borda); }
+  h1 { margin: 0; font-size: 15px; letter-spacing: .04em; text-transform: uppercase; }
+  h1 span { color: var(--fraco); text-transform: none; letter-spacing: 0; }
+  main { padding: 20px 24px 60px; max-width: 1180px; }
+  section { margin-bottom: 32px; }
+  h2 {
+    margin: 0 0 10px; font-size: 12px; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--fraco); font-weight: 600;
+  }
+  /* O pedido do usuário mora dentro de um h2 e não deve herdar o caixa-alta:
+     é texto livre em português, não rótulo de seção. Uma linha só — um pedido
+     com critérios de aceite tem parágrafos, e inteiro ele empurra a linha do
+     tempo para fora da tela. O texto completo fica no title. */
+  h2 .normal {
+    text-transform: none; letter-spacing: 0; color: var(--texto); font-weight: 400;
+    display: inline-block; max-width: 62ch; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom;
+  }
+  a { color: var(--azul); }
+  button.voltar {
+    background: none; border: 1px solid var(--borda); color: var(--fraco);
+    border-radius: 4px; padding: 3px 9px; cursor: pointer; font: inherit;
+    font-size: 12px;
+  }
+  button.voltar:hover { color: var(--texto); border-color: var(--fraco); }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th {
+    text-align: left; font-weight: 600; color: var(--fraco); font-size: 11px;
+    letter-spacing: .06em; text-transform: uppercase; padding: 6px 10px 6px 0;
+    border-bottom: 1px solid var(--borda); white-space: nowrap;
+  }
+  td { padding: 7px 10px 7px 0; border-bottom: 1px solid var(--borda); vertical-align: top; }
+  tbody tr.clicavel { cursor: pointer; }
+  tbody tr.clicavel:hover td { background: var(--papel); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .truncar { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .cartoes { display: flex; flex-wrap: wrap; gap: 10px; }
+  .cartao {
+    background: var(--papel); border: 1px solid var(--borda); border-radius: 6px;
+    padding: 10px 14px; min-width: 132px;
+  }
+  .cartao .rotulo {
+    font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--fraco);
+  }
+  .cartao .valor { font-size: 19px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+  .selo {
+    display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px;
+    border: 1px solid currentColor;
+  }
+  .selo.ok { color: var(--verde); }
+  .selo.ruim { color: var(--vermelho); }
+  .selo.neutro { color: var(--fraco); }
+  .selo.vivo { color: var(--azul); }
+
+  .legenda { display: flex; gap: 16px; flex-wrap: wrap; color: var(--fraco); font-size: 12px; margin-top: 8px; }
+  .legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
+
+  svg { display: block; width: 100%; }
+  svg text { font: 11px ui-monospace, Menlo, monospace; fill: var(--texto); }
+  svg text.fraco { fill: var(--fraco); }
+  .vazio { color: var(--fraco); padding: 20px 0; }
+</style>
+</head>
+<body>
+<header><h1>Painel de métricas <span id="subtitulo"></span></h1></header>
+<main id="tela"><p class="vazio">Carregando…</p></main>
+
+<script>
+"use strict";
+
+const COR = {
+  ok: "var(--verde)", ruim: "var(--vermelho)", neutro: "var(--cinza)",
+  erro: "var(--ambar)",
+};
+// Origens de rodada: a cor diz de onde veio a cobrança, não se foi boa.
+const COR_ORIGEM = {
+  preparacao: "var(--cinza)", inicial: "var(--azul)", testes: "var(--ambar)",
+  revisao: "var(--vermelho)", pentest: "var(--verde)", indeterminada: "var(--fraco)",
+};
+
+const el = (tag, attrs = {}, filhos = []) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v;
+    else if (k === "text") n.textContent = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v);
+  }
+  for (const f of [].concat(filhos)) n.append(f);
+  return n;
+};
+
+const svgEl = (tag, attrs = {}) => {
+  const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  return n;
+};
+
+const dur = (s) => {
+  if (s == null) return "—";
+  if (s < 90) return `${Math.round(s)}s`;
+  const m = Math.floor(s / 60);
+  if (m < 90) return `${m}m${String(Math.round(s % 60)).padStart(2, "0")}`;
+  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}`;
+};
+
+const pct = (parte, todo) => (todo > 0 ? Math.round((parte / todo) * 100) : 0);
+
+const corDoVeredito = (b) =>
+  b.erro ? COR.erro : b.veredito === true ? COR.ok : b.veredito === false ? COR.ruim : COR.neutro;
+
+const seloDesfecho = (d) => {
+  const classe = { deploy: "ok", erro: "ruim", em_curso: "vivo" }[d] || "neutro";
+  return el("span", { class: `selo ${classe}`, text: d });
+};
+
+const tela = document.getElementById("tela");
+const subtitulo = document.getElementById("subtitulo");
+let timer = null;
+
+const buscar = async (rota) => {
+  const r = await fetch(rota, { cache: "no-store" });
+  if (!r.ok) throw new Error(`${rota} → ${r.status}`);
+  return r.json();
+};
+
+// ---------- tela 3: histórico ----------
+
+async function verHistorico() {
+  clearTimeout(timer);
+  location.hash = "";
+  subtitulo.textContent = "";
+  const execucoes = await buscar("/api/execucoes");
+
+  if (!execucoes.length) {
+    tela.replaceChildren(el("p", { class: "vazio", text: "Nenhuma execução em metrics/." }));
+    return;
+  }
+
+  const total = execucoes.length;
+  const comDeploy = execucoes.filter((e) => e.desfecho === "deploy").length;
+  const comTeto = execucoes.filter((e) => e.tetos.length).length;
+  const retrabalho = execucoes.reduce((a, e) => a + e.retrabalho_s, 0);
+  const nosTotal = execucoes.reduce((a, e) => a + e.tempo_nos_s, 0);
+
+  const cartoes = el("div", { class: "cartoes" }, [
+    cartao("Execuções", total),
+    cartao("Chegaram ao deploy", `${comDeploy} (${pct(comDeploy, total)}%)`),
+    cartao("Pararam por teto", `${comTeto} (${pct(comTeto, total)}%)`),
+    cartao("Tempo em retrabalho", `${pct(retrabalho, nosTotal)}%`),
+  ]);
+
+  const corpo = execucoes.map((e) =>
+    el("tr", { class: "clicavel", onclick: () => verExecucao(e.thread_id) }, [
+      el("td", { text: e.inicio.replace("T", " ").slice(0, 16) }),
+      el("td", { class: "truncar", title: e.pedido || e.thread_id, text: e.pedido || "(sem pedido registrado)" }),
+      el("td", {}, seloDesfecho(e.desfecho)),
+      el("td", { class: "num", text: dur(e.wall_s) }),
+      el("td", { class: "num", text: dur(e.tempo_nos_s) }),
+      el("td", { class: "num", text: e.tempo_nos_s ? `${pct(e.retrabalho_s, e.tempo_nos_s)}%` : "—" }),
+      el("td", { class: "num", text: e.rodadas }),
+      el("td", { class: "num", text: e.cobertura == null ? "—" : `${e.cobertura}%` }),
+      el("td", { text: e.tetos.join(", ") || "—" }),
+    ])
+  );
+
+  tela.replaceChildren(
+    el("section", {}, [el("h2", { text: "Série de execuções" }), cartoes]),
+    el("section", {}, [
+      el("h2", { text: `${total} execuções` }),
+      el("table", {}, [
+        el("thead", {}, el("tr", {}, ["quando", "pedido", "desfecho", "wall", "nós", "retrab.", "rodadas", "cob.", "tetos"]
+          .map((t) => el("th", { text: t })))),
+        el("tbody", {}, corpo),
+      ]),
+    ])
+  );
+}
+
+const cartao = (rotulo, valor) =>
+  el("div", { class: "cartao" }, [
+    el("div", { class: "rotulo", text: rotulo }),
+    el("div", { class: "valor", text: String(valor) }),
+  ]);
+
+// ---------- telas 1 e 2: uma execução ----------
+
+async function verExecucao(threadId) {
+  clearTimeout(timer);
+  location.hash = threadId;
+  const d = await buscar(`/api/execucao/${threadId}`);
+  subtitulo.textContent = `· ${threadId.slice(0, 8)}`;
+
+  const cabecalho = el("section", {}, [
+    el("h2", {}, [
+      el("button", { class: "voltar", text: "← todas", onclick: verHistorico }),
+      el("span", { class: "normal", title: d.pedido || threadId, text: ` ${d.pedido || threadId} ` }),
+      seloDesfecho(d.desfecho),
+    ]),
+    el("div", { class: "cartoes" }, [
+      cartao("Wall-clock", dur(d.wall_s)),
+      cartao("Tempo nos nós", dur(d.tempo_nos_s)),
+      cartao("Fora dos nós", dur(d.fora_dos_nos_s)),
+      cartao("Retrabalho", `${pct(d.retrabalho_s, d.tempo_nos_s)}%`),
+      cartao("Rodadas", d.rodadas.length - 1),
+      cartao("Contexto ao LLM", d.chars_contexto ? `${(d.chars_contexto / 1000).toFixed(0)}k` : "—"),
+    ]),
+  ]);
+
+  tela.replaceChildren(
+    cabecalho,
+    el("section", {}, [el("h2", { text: "Linha do tempo" }), timeline(d), legendaTimeline()]),
+    el("section", {}, [el("h2", { text: "Repartição por rodada" }), reparticao(d)]),
+    el("section", {}, [el("h2", { text: "Marcos" }), tabelaMarcos(d)])
+  );
+
+  // Execução viva se atualiza sozinha; execução encerrada não tem o que
+  // repolar — e um poll eterno em 19 arquivos antigos é só ruído.
+  if (d.desfecho === "em_curso") timer = setTimeout(() => verExecucao(threadId), 3000);
+}
+
+function timeline(d) {
+  const LARG_ROTULO = 160, MARGEM = 12, ALT_LINHA = 24, TOPO = 26;
+  const largura = Math.max(560, tela.clientWidth || 900);
+  const plot = largura - LARG_ROTULO - MARGEM;
+
+  // Uma faixa por nó, na ordem em que o nó apareceu pela primeira vez.
+  const faixas = [];
+  for (const b of d.barras) if (!faixas.includes(b.evento)) faixas.push(b.evento);
+
+  const span = Math.max(d.wall_s, 1);
+  const x = (s) => LARG_ROTULO + (s / span) * plot;
+  const altura = TOPO + faixas.length * ALT_LINHA + 22;
+  const svg = svgEl("svg", { viewBox: `0 0 ${largura} ${altura}`, height: altura });
+
+  // Separadores de rodada: onde o laço voltou ao desenvolvimento.
+  for (const r of d.rodadas.slice(1)) {
+    svg.append(svgEl("line", {
+      x1: x(r.inicio_s), x2: x(r.inicio_s), y1: TOPO - 12, y2: altura - 20,
+      stroke: "var(--borda)", "stroke-dasharray": "3 3",
+    }));
+    const rot = svgEl("text", { x: x(r.inicio_s) + 3, y: TOPO - 15, class: "fraco" });
+    rot.textContent = `r${r.n} ${r.origem}`;
+    svg.append(rot);
+  }
+
+  faixas.forEach((nome, i) => {
+    const y = TOPO + i * ALT_LINHA;
+    const rotulo = svgEl("text", { x: 0, y: y + 12, class: "fraco" });
+    rotulo.textContent = nome;
+    svg.append(rotulo);
+
+    for (const b of d.barras.filter((b) => b.evento === nome)) {
+      const larguraBarra = Math.max(2, (b.duracao_s / span) * plot);
+      const barra = svgEl("rect", {
+        x: x(b.inicio_s), y: y + 2, width: larguraBarra, height: ALT_LINHA - 8,
+        rx: 2, fill: corDoVeredito(b),
+      });
+      const titulo = svgEl("title");
+      titulo.textContent =
+        `${b.evento} · rodada ${b.rodada} · ${dur(b.duracao_s)}` +
+        (b.erro ? `\nerro: ${b.erro}` : b.veredito === null ? "" : `\nveredito: ${b.veredito}`);
+      barra.append(titulo);
+      svg.append(barra);
+    }
+  });
+
+  // Marcos pontuais no rodapé: retomadas, tetos, início e fim.
+  for (const m of d.marcos) {
+    const cx = x(m.inicio_s), cy = altura - 12;
+    const losango = svgEl("path", {
+      d: `M ${cx} ${cy - 5} L ${cx + 5} ${cy} L ${cx} ${cy + 5} L ${cx - 5} ${cy} Z`,
+      fill: m.evento === "teto_atingido" ? COR.ruim : "var(--fraco)",
+    });
+    const titulo = svgEl("title");
+    titulo.textContent = `${m.evento} ${JSON.stringify(m.detalhe)}`;
+    losango.append(titulo);
+    svg.append(losango);
+  }
+
+  const eixo = svgEl("text", { x: LARG_ROTULO, y: altura - 1, class: "fraco" });
+  eixo.textContent = `0 → ${dur(d.wall_s)} (wall-clock; vãos entre barras são tempo fora dos nós)`;
+  svg.append(eixo);
+  return svg;
+}
+
+const legendaTimeline = () =>
+  el("div", { class: "legenda" }, [
+    ["veredito positivo", COR.ok], ["veredito negativo", COR.ruim],
+    ["sem veredito", COR.neutro], ["nó que quebrou", COR.erro],
+  ].map(([t, c]) =>
+    el("span", {}, [el("i", { style: `background:${c}` }), document.createTextNode(t)])
+  ));
+
+function reparticao(d) {
+  const total = d.rodadas.reduce((a, r) => a + r.duracao_s, 0) || 1;
+  const barra = el("div", {
+    style: "display:flex;height:26px;border-radius:4px;overflow:hidden;border:1px solid var(--borda)",
+  });
+  for (const r of d.rodadas) {
+    if (!r.duracao_s) continue;
+    // Rodadas seguidas de mesma origem têm a mesma cor e virariam um bloco só;
+    // o filete à direita mantém a contagem de rodadas legível na barra.
+    const fatia = el("div", {
+      style: `width:${(r.duracao_s / total) * 100}%;`
+        + `background:${COR_ORIGEM[r.origem] || COR.neutro};`
+        + "box-shadow:inset -1px 0 0 var(--fundo)",
+      title: `rodada ${r.n} (${r.origem}) — ${dur(r.duracao_s)}`,
+    });
+    barra.append(fatia);
+  }
+
+  const linhas = d.rodadas.map((r) =>
+    el("tr", {}, [
+      el("td", {}, [el("i", {
+        style: `display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;background:${COR_ORIGEM[r.origem] || COR.neutro}`,
+      }), document.createTextNode(r.n === 0 ? "preparação" : `rodada ${r.n}`)]),
+      el("td", { text: r.origem }),
+      el("td", { class: "num", text: dur(r.duracao_s) }),
+      el("td", { class: "num", text: `${pct(r.duracao_s, total)}%` }),
+      el("td", { class: "num", text: r.chars_contexto ? `${(r.chars_contexto / 1000).toFixed(0)}k` : "—" }),
+    ])
+  );
+
+  return el("div", {}, [
+    barra,
+    el("table", { style: "margin-top:12px" }, [
+      el("thead", {}, el("tr", {}, ["fatia", "origem", "tempo", "share", "contexto"]
+        .map((t) => el("th", { text: t })))),
+      el("tbody", {}, linhas),
+    ]),
+  ]);
+}
+
+function tabelaMarcos(d) {
+  if (!d.marcos.length) {
+    return el("p", { class: "vazio", text: "Nenhum marco — histórico anterior aos eventos de execução." });
+  }
+  return el("table", {}, [
+    el("thead", {}, el("tr", {}, ["quando", "marco", "detalhe"].map((t) => el("th", { text: t })))),
+    el("tbody", {}, d.marcos.map((m) =>
+      el("tr", {}, [
+        el("td", { class: "num", text: `+${dur(m.inicio_s)}` }),
+        el("td", {}, el("span", {
+          class: `selo ${m.evento === "teto_atingido" ? "ruim" : "neutro"}`, text: m.evento,
+        })),
+        // O detalhe do `inicio_execucao` carrega o pedido inteiro, que aqui
+        // ocuparia meia tela; a tabela existe para ser varrida, não lida.
+        el("td", {
+          class: "truncar",
+          title: Object.entries(m.detalhe).map(([k, v]) => `${k}=${v}`).join("\n"),
+          text: Object.entries(m.detalhe).map(([k, v]) => `${k}=${v}`).join("  ") || "—",
+        }),
+      ])
+    )),
+  ]);
+}
+
+// ---------- entrada ----------
+
+const rotear = () => {
+  const alvo = location.hash.slice(1);
+  (alvo ? verExecucao(alvo) : verHistorico()).catch((e) => {
+    tela.replaceChildren(el("p", { class: "vazio", text: `Falhou: ${e.message}` }));
+  });
+};
+
+window.addEventListener("hashchange", rotear);
+window.addEventListener("resize", () => { if (location.hash) rotear(); });
+rotear();
+</script>
+</body>
+</html>

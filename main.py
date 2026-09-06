@@ -21,8 +21,8 @@ truststore.inject_into_ssl()
 
 load_dotenv(override=True)
 
-from src.squad.graph.workflow import construir_grafo  # noqa: E402
-from src.squad.metricas import resumo  # noqa: E402
+from src.squad.graph.workflow import DeployNegado, construir_grafo  # noqa: E402
+from src.squad.metricas import registrar, resumo  # noqa: E402
 
 
 def _rodar(grafo, entrada, config) -> None:
@@ -42,6 +42,10 @@ def main() -> None:
         thread_id = args.thread
         config = {"configurable": {"thread_id": thread_id}}
         print(f"Retomando thread {thread_id} do último checkpoint...")
+        # Uma thread pode atravessar vários processos. Sem este marco, a única
+        # pista de retomada é uma lacuna no relógio entre dois eventos — que
+        # também é o que uma chamada lenta ao provedor parece.
+        registrar(thread_id, "retomada")
         entrada = None  # None = continuar de onde parou
     else:
         pedido = " ".join(args.pedido) or "Criar endpoint de healthcheck"
@@ -50,22 +54,44 @@ def main() -> None:
         print(f"Thread id desta execução: {thread_id}")
         print("(guarde para retomar com: python main.py --thread " + thread_id + ")")
         entrada = {"pedido": pedido}
+        registrar(thread_id, "inicio_execucao", pedido=pedido)
 
+    # O gate humano entra no try: negar o deploy levanta, e esse desfecho é tão
+    # informativo quanto uma queda do provedor. Com os dois lados cobertos, um
+    # histórico sem `fim_execucao` passa a significar uma coisa só — a execução
+    # ainda está viva, ou o processo morreu sem chance de registrar.
     try:
         _rodar(grafo, entrada, config)
+        estado = grafo.get_state(config)
+        if estado.next:  # pausado no gate humano
+            print("\nGrafo pausado aguardando aprovação humana.")
+            resposta = input("Autorizar deploy? (sim/nao): ")
+            from langgraph.types import Command
+            _rodar(grafo, Command(resume=resposta), config)
+    except DeployNegado as e:
+        # Recusa é decisão, não falha: gravar como `erro` faria a thread parecer,
+        # no histórico, igual a uma que caiu no meio — e contaminaria qualquer
+        # leitura de taxa de conclusão.
+        registrar(thread_id, "fim_execucao", desfecho="negado", motivo=str(e))
+        print(f"\nDeploy recusado no gate: {e}")
+        print(f"Nada foi publicado. Para reabrir a decisão: python main.py --thread {thread_id}")
+        raise SystemExit(1)
     except Exception as e:
+        registrar(
+            thread_id, "fim_execucao",
+            desfecho="erro",
+            erro=f"{type(e).__name__}: {e}"[:300],
+        )
         print(f"\nExecução interrompida: {e}")
         print(f"Progresso salvo. Retome com: python main.py --thread {thread_id}")
         raise SystemExit(1)
 
-    estado = grafo.get_state(config)
-    if estado.next:  # pausado no gate humano
-        print("\nGrafo pausado aguardando aprovação humana.")
-        resposta = input("Autorizar deploy? (sim/nao): ")
-        from langgraph.types import Command
-        _rodar(grafo, Command(resume=resposta), config)
-
     final = grafo.get_state(config).values
+    registrar(
+        thread_id, "fim_execucao",
+        desfecho="deploy" if final.get("deploy_ok") else "sem_deploy",
+        deploy_ref=final.get("deploy_ref", ""),
+    )
     print("\nDeploy ok:", final.get("deploy_ok", False))
     if final.get("deploy_ref"):
         print("Entrega publicada em:", final["deploy_ref"])

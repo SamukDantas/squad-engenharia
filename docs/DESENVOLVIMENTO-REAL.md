@@ -22,9 +22,9 @@ ao mundo real supera cinco agentes conversando sobre ele.
 > workspace como camada adicional. Entregas são em **Python** (o pytest é o
 > juiz) e as dependências do código gerado vêm de um **ambiente
 > pré-provisionado** (requirements.txt e a imagem do sandbox) — sem pip
-> install em runtime. O deploy publica a entrega na branch
-> `entrega/<thread_id>` do repositório configurado em `DEPLOY_REPO` (sem a
-> variável, commit local apenas).
+> install em runtime. O deploy publica cada projeto num repositório próprio,
+> criado sob `DEPLOY_OWNER` se ainda não existir (sem a variável, commit local
+> apenas).
 
 ### Fase 1 — Workspace real por execução
 Uma pasta `workspace/<thread_id>/` onde o código vive como **arquivos**, não
@@ -54,11 +54,39 @@ O nó de deploy deixa de ser um `print` e executa `git commit` + `push` (ou
 build de container), atrás do mesmo gate humano.
 
 *Desenho implementado:* o workspace vira repositório git próprio; a entrega
-é commitada (com `.gitignore` para caches de execução) e publicada na branch
-`entrega/<thread_id>` do repositório alvo fixo (`DEPLOY_REPO=owner/repo` no
-`.env`). Sem `DEPLOY_REPO`, degrada para commit local com aviso. Falha de
-git (exit != 0 ou timeout) levanta erro explícito — o checkpoint preserva o
-progresso e `--thread` retoma reexecutando só o deploy.
+é commitada (com `.gitignore` para caches de execução) e publicada num
+repositório **do projeto**, `<DEPLOY_OWNER>/<slug do pedido>`, criado via `gh`
+se ainda não existir. Sem `DEPLOY_OWNER`, degrada para commit local com aviso.
+Falha de git ou gh (exit != 0 ou timeout) levanta erro explícito — o checkpoint
+preserva o progresso e `--thread` retoma reexecutando só o deploy.
+
+O alvo fixo anterior (`DEPLOY_REPO=owner/repo`, uma branch `entrega/<thread_id>`
+por execução) concentrava todas as entregas num ponto único de perda: quando o
+repositório foi apagado, as três entregas de agosto/2026 foram junto. O
+`DEPLOY_REPO` antigo ainda é aceito como fallback, lendo só o dono.
+
+### Fase 9 — Verificação visual da entrega
+Terceira camada de veredito por execução, ao lado do pytest e do pentest. O
+pytest prova que funciona; o pentest, que não é trivialmente explorável; este
+nó, que é legível na tela de quem abrir.
+
+*Motivo:* uma entrega real passou por 42 testes verdes e por um revisor LLM que
+aprovou, estando ilegível no tema escuro do sistema — a página declarava
+`color:` e nenhum `background:`. Nenhuma das duas camadas alcança isso por
+construção: o revisor lê texto de código e não sabe o que aparece atrás da cor,
+e o pytest não pinta pixel.
+
+*Desenho implementado:* `visual.py` roda um container `squad-visual`
+(Chromium via Playwright, versão fixa) com a entrega montada read-only e
+`--network none` — a jaula do pytest, não a do pentest: abrir HTML gerado por
+LLM é executar código de terceiro, mas não há alvo a alcançar, as páginas são
+abertas por `file://`. Cada página é renderizada uma vez por tema do sistema e o
+contraste sai de `getComputedStyle` num motor de layout real, medido contra o
+fundo efetivo (subindo a árvore até um `background-color` opaco). O veredito é
+o piso WCAG AA, e o feedback é a medição, não uma paráfrase dela.
+
+*Limite conhecido:* mede a entrega estática. Conteúdo que só existe depois de um
+`fetch` não é medido, porque sem rede o fetch não completa.
 
 ### Fase 5 — OpenCode como músculo
 O nó de desenvolvimento invoca o OpenCode CLI em modo headless
