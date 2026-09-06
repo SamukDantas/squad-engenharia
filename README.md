@@ -144,7 +144,7 @@ Os testes gerados rodam em **sandbox Docker** (`TEST_RUNNER=docker`, padrão).
 Construa a imagem uma vez:
 
 ```bash
-docker build -f Dockerfile.sandbox -t squad-sandbox:latest .
+docker build -f Dockerfile.sandbox-python -t squad-sandbox-python:latest .
 ```
 
 Sem Docker, use `TEST_RUNNER=host` — os testes passam a rodar direto na sua
@@ -197,7 +197,25 @@ por execução e gravada no checkpoint:
 
 ```bash
 python main.py --stack python "Criar endpoint de healthcheck"
+python main.py --stack nextjs "Dashboard de indicadores do funil comercial"
+python main.py --stack java   "API de reserva de salas com autenticação"
 ```
+
+Cada stack tem sandbox próprio, construído uma vez:
+
+| stack | runner | cobertura | imagem |
+|---|---|---|---|
+| `python` | pytest | coverage.py | `Dockerfile.sandbox-python` |
+| `nextjs` | vitest | V8 / istanbul | `Dockerfile.sandbox-nextjs` |
+| `java` | maven | JaCoCo | `Dockerfile.sandbox-java` |
+
+Tudo roda com `--network none`, então o ambiente vem assado na imagem: o
+`node_modules` fica um nível acima do projeto (o resolvedor do Node sobe a
+árvore e o encontra), e o `~/.m2` do Java é populado no build rodando um projeto
+semente de verdade — `dependency:go-offline` sozinho não traz os plugins que só
+são acionados durante o ciclo. Por isso o `pom.xml` da entrega Java não é livre:
+o executor recebe no prompt exatamente o [pom de
+referência](docker/pom-referencia.xml) que semeou a imagem.
 
 A camada de fora (`graph/workflow.py`) lê disco, chama adaptadores e traduz o
 que o domínio devolve em efeito. As rotas, por exemplo, não registram métrica
@@ -254,7 +272,7 @@ determinístico sobe a entrega como servidor e a ataca de verdade. Requer duas
 imagens, construídas uma vez:
 
 ```bash
-docker build -f Dockerfile.target  -t squad-target:latest  .
+docker build -f Dockerfile.target-python -t squad-target-python:latest .
 docker build -f Dockerfile.pentest -t squad-pentest:latest .
 ```
 

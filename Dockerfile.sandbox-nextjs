@@ -1,0 +1,36 @@
+# Jaula de execução dos testes da stack Next.js/TypeScript.
+#
+# O container roda com --network none, então nada pode ser instalado em runtime:
+# o ambiente pré-provisionado vem assado aqui, e um import fora da lista quebra
+# a suíte com erro de resolução — que é reprova com mensagem real, não download.
+#
+# `node_modules` fica em /app, um nível acima de /app/projeto (para onde a
+# entrega é copiada). O resolvedor do Node sobe a árvore de diretórios
+# procurando `node_modules`, então a entrega o enxerga sem symlink nenhum.
+#
+# Build (uma vez):
+#   docker build -f Dockerfile.sandbox-nextjs -t squad-sandbox-nextjs:latest .
+FROM node:22-slim
+
+# O usuário `node` (uid 1000) já existe na imagem base. Instalar como ele, e não
+# como root, evita um `chown -R` depois — que duplicaria centenas de MB numa
+# camada nova, porque camada é aditiva.
+RUN mkdir -p /app && chown node:node /app
+USER node
+WORKDIR /app
+
+# Versões fixas: dependência que muda sozinha muda o veredito sozinho.
+# Mantenha em sincronia com `libs_permitidas` em adaptadores/perfil_nextjs.py —
+# é a lista que o executor recebe no prompt.
+RUN npm init -y > /dev/null \
+    && npm install --no-audit --no-fund --loglevel=error \
+        next@15.1.3 \
+        react@18.3.1 \
+        react-dom@18.3.1 \
+        vitest@2.1.8 \
+        @vitest/coverage-v8@2.1.8 \
+        jsdom@25.0.1
+
+# A entrega é copiada para cá em runtime; o diretório precisa existir e ser do
+# usuário sem privilégio.
+WORKDIR /app

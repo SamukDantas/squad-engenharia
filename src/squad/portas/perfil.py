@@ -82,9 +82,11 @@ class PerfilStack:
     # ---- publicação e pentest ----
     gitignore_entrega: str = ""
     imagem_alvo: str = ""            # imagem que sobe a entrega para o pentest
+    dockerfile_alvo: str = ""        # citado na mensagem de erro de imagem ausente
 
     # ---- prompts ----
     libs_permitidas: str = ""        # ambiente pré-provisionado, citado ao executor
+    instrucoes_qa: str = ""          # onde e como o QA escreve a suíte
 
     # Campos reservados para o passo dos prompts; vazios não mudam nada hoje.
     instrucoes_executor: str = ""

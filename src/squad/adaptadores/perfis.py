@@ -4,12 +4,13 @@ Acrescentar uma stack é acrescentar uma linha aqui e um módulo de perfil ao
 lado — não é mexer no grafo.
 """
 from ..portas.perfil import PerfilStack
-from . import perfil_python
+from . import perfil_java, perfil_nextjs, perfil_python
 
 PERFIL_PADRAO = "python"
 
 _PERFIS: dict[str, PerfilStack] = {
-    perfil_python.PERFIL.nome: perfil_python.PERFIL,
+    p.nome: p
+    for p in (perfil_python.PERFIL, perfil_nextjs.PERFIL, perfil_java.PERFIL)
 }
 
 

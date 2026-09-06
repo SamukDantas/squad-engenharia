@@ -69,8 +69,6 @@ MCP_CONHECIDOS = (
     "windows-mcp",
 )
 
-LIBS_PERMITIDAS = "fastapi, flask, httpx, requests"
-
 # Diretório de trabalho da squad dentro do workspace: instruções para o
 # executor, fora da entrega (ignorado nas varreduras e no deploy).
 DIR_SQUAD = ".squad"
@@ -176,7 +174,7 @@ def _config_escopo(workspace: str) -> str:
     return json.dumps(config)
 
 
-def _instrucoes(spec: str, feedback_qa: str) -> str:
+def _instrucoes(spec: str, feedback_qa: str, perfil) -> str:
     correcao = ""
     if feedback_qa and feedback_qa.strip():
         correcao = (
@@ -190,24 +188,19 @@ def _instrucoes(spec: str, feedback_qa: str) -> str:
         "Implemente a especificação abaixo neste diretório, escrevendo "
         "arquivos reais.\n\n"
         "## Regras obrigatórias\n"
-        "- Python apenas, usando somente a biblioteca padrão e estas libs já "
-        f"instaladas: {LIBS_PERMITIDAS}. Não use nenhuma outra dependência.\n"
-        "- NÃO crie nem edite nada dentro de `tests/` — os testes são escritos "
-        "por outro agente da equipe de qualidade.\n"
+        # O bloco específico da stack — linguagem, libs disponíveis e onde a
+        # suíte mora — vem do perfil. O resto vale para qualquer entrega.
+        f"{perfil.instrucoes_executor}\n"
         "- Escreva ou atualize o `README.md` com a estrutura e as instruções "
         "de execução.\n"
         "- NÃO deixe arquivos de rastro na entrega (saída de comandos, logs, "
         "relatórios de teste). Se precisar salvar algo transitório, use o "
         "diretório `.squad/`.\n"
-        "- NÃO crie scripts para rodar os testes (`run_tests.py` e afins): a "
-        "suíte é executada pelo próprio pipeline.\n"
         "- Escreva `.squad/run.json` declarando como subir a aplicação como "
         "servidor HTTP, para o pipeline de segurança atacá-la. Formato exato:\n"
-        '  `{\"cmd\": [\"uvicorn\", \"main:app\", \"--host\", \"0.0.0.0\", '
-        '\"--port\", \"8000\"], \"port\": 8000, \"health_path\": \"/docs\"}`\n'
-        "  Use o comando real desta entrega (o módulo/porta corretos; Flask usa "
-        "`flask --app <mod> run --host 0.0.0.0 --port <p>`). `health_path` é uma "
-        "rota que responde com a app no ar (ex.: `/docs`, `/health`, `/`).\n"
+        f"  `{perfil.exemplo_run_json}`\n"
+        "  Use o comando real desta entrega (módulo e porta corretos). "
+        "`health_path` é uma rota que responde com a app no ar.\n"
         "- Mantenha o escopo estritamente na especificação.\n\n"
         "## Especificação\n\n"
         f"{spec}\n"
@@ -215,7 +208,7 @@ def _instrucoes(spec: str, feedback_qa: str) -> str:
     )
 
 
-def executar_opencode(workspace: str, spec: str, feedback_qa: str = "") -> str:
+def executar_opencode(workspace: str, spec: str, feedback_qa: str, perfil) -> str:
     binario = shutil.which("opencode")
     if not binario:
         raise RuntimeError(
@@ -226,7 +219,7 @@ def executar_opencode(workspace: str, spec: str, feedback_qa: str = "") -> str:
     dir_squad = Path(workspace) / DIR_SQUAD
     dir_squad.mkdir(parents=True, exist_ok=True)
     (dir_squad / ARQUIVO_TAREFA).write_text(
-        _instrucoes(spec, feedback_qa), encoding="utf-8"
+        _instrucoes(spec, feedback_qa, perfil), encoding="utf-8"
     )
 
     comando = [binario, "run", "--dir", workspace]

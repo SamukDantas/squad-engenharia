@@ -40,6 +40,8 @@ omit =
     conftest.py
 """
 
+_LIBS = "fastapi, flask, httpx, requests"
+
 _GITIGNORE = (
     "__pycache__/\n.pytest_cache/\n.ruff_cache/\n.squad/\n*.pyc\n"
     # Rastro de comandos rodados pelo executor: não é entrega.
@@ -105,8 +107,8 @@ def _ler_cobertura(texto: str) -> Cobertura:
 
 PERFIL = PerfilStack(
     nome="python",
-    imagem_sandbox="squad-sandbox:latest",
-    dockerfile_sandbox="Dockerfile.sandbox",
+    imagem_sandbox="squad-sandbox-python:latest",
+    dockerfile_sandbox="Dockerfile.sandbox-python",
     runner="pytest",
     comando_container=_comando_container,
     comando_host=_comando_host,
@@ -120,6 +122,24 @@ PERFIL = PerfilStack(
     ),
     extensoes_descartaveis=frozenset({".pyc"}),
     gitignore_entrega=_GITIGNORE,
-    imagem_alvo="squad-target:latest",
-    libs_permitidas="fastapi, flask, httpx, requests",
+    imagem_alvo="squad-target-python:latest",
+    dockerfile_alvo="Dockerfile.target-python",
+    libs_permitidas=_LIBS,
+    instrucoes_qa=(
+        "Escreva testes pytest no diretório `tests/`. Eles serão executados "
+        "com pytest a partir da raiz do workspace."
+    ),
+    instrucoes_executor=(
+        "- Python apenas, usando somente a biblioteca padrão e estas libs já "
+        f"instaladas: {_LIBS}. Não use nenhuma outra dependência.\n"
+        "- NÃO crie nem edite nada dentro de `tests/` — os testes são escritos "
+        "por outro agente da equipe de qualidade.\n"
+        "- NÃO crie scripts para rodar os testes (`run_tests.py` e afins): a "
+        "suíte é executada pelo próprio pipeline."
+    ),
+    exemplo_run_json=(
+        '{"cmd": ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", 8000], '
+        '"port": 8000, "health_path": "/docs"}  '
+        "(Flask usa `flask --app <mod> run --host 0.0.0.0 --port <p>`)"
+    ),
 )

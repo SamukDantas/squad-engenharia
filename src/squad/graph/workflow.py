@@ -466,12 +466,16 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     ) as m:
         m.update(chars_contexto=len(state["spec"]) + len(feedback))
         if executor == "opencode":
-            executar_opencode(state["workspace"], state["spec"], feedback)
+            executar_opencode(
+                state["workspace"], state["spec"], feedback, perfil
+            )
         elif executor == "crews":
             crew_desenvolvimento(state["workspace"]).kickoff(
                 inputs={
                     "spec": state["spec"],
                     "feedback_qa": feedback or "Nenhum — primeira rodada.",
+                    "stack": perfil.nome,
+                    "libs_permitidas": perfil.libs_permitidas,
                 }
             )
         else:
@@ -496,6 +500,7 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
 
 
 def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
+    perfil = _perfil(state)
     arquivos_antes = "\n".join(state.get("arquivos", []))
     with medir(_tid(config), "escrever_testes") as m:
         m.update(chars_contexto=(
@@ -508,14 +513,16 @@ def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
                 "spec": state["spec"],
                 "arquivos": arquivos_antes or "(workspace vazio)",
                 "feedback_qa": state.get("feedback_qa", "") or "Nenhum — primeira rodada.",
+                "libs_permitidas": perfil.libs_permitidas,
+                "instrucoes_qa": perfil.instrucoes_qa,
             }
         ), caro=True)
     # Revarre o workspace: os testes agora fazem parte da entrega e entram
     # no dump que o revisor recebe.
-    arquivos = _arquivos_do_workspace(state["workspace"], _perfil(state))
+    arquivos = _arquivos_do_workspace(state["workspace"], perfil)
     return {
         "arquivos": arquivos,
-        "codigo": _dump_codigo(state["workspace"], arquivos, _perfil(state)),
+        "codigo": _dump_codigo(state["workspace"], arquivos, perfil),
         "testes_tentativas": state.get("testes_tentativas", 0) + 1,
     }
 

@@ -1,0 +1,28 @@
+# Alvo do pentest para a stack Next.js: sobe a entrega como servidor.
+#
+# Espelha a imagem do sandbox — mesmas dependências, mesmo lugar do
+# `node_modules` — mas sem o vitest no caminho: aqui a entrega roda, não é
+# testada. O comando de subida vem do `.squad/run.json` que o executor escreve.
+#
+# Diferente do sandbox, este container **tem** rede: o alvo precisa estar
+# alcançável pelo atacante. A contenção é a bridge Docker `--internal`, sem rota
+# para a internet (ver src/squad/pentest.py).
+#
+# Build (uma vez, e só se PENTEST_HABILITADO=1):
+#   docker build -f Dockerfile.target-nextjs -t squad-target-nextjs:latest .
+FROM node:22-slim
+
+RUN mkdir -p /app && chown node:node /app
+USER node
+WORKDIR /app
+
+# Mesmas versões da imagem do sandbox: entrega que passa nos testes e quebra no
+# alvo por diferença de versão seria um veredito sobre o ambiente, não sobre o
+# código.
+RUN npm init -y > /dev/null \
+    && npm install --no-audit --no-fund --loglevel=error \
+        next@15.1.3 \
+        react@18.3.1 \
+        react-dom@18.3.1
+
+WORKDIR /app
