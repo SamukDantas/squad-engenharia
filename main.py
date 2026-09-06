@@ -21,7 +21,7 @@ truststore.inject_into_ssl()
 
 load_dotenv(override=True)
 
-from src.squad.graph.workflow import construir_grafo  # noqa: E402
+from src.squad.graph.workflow import DeployNegado, construir_grafo  # noqa: E402
 from src.squad.metricas import registrar, resumo  # noqa: E402
 
 
@@ -68,6 +68,14 @@ def main() -> None:
             resposta = input("Autorizar deploy? (sim/nao): ")
             from langgraph.types import Command
             _rodar(grafo, Command(resume=resposta), config)
+    except DeployNegado as e:
+        # Recusa é decisão, não falha: gravar como `erro` faria a thread parecer,
+        # no histórico, igual a uma que caiu no meio — e contaminaria qualquer
+        # leitura de taxa de conclusão.
+        registrar(thread_id, "fim_execucao", desfecho="negado", motivo=str(e))
+        print(f"\nDeploy recusado no gate: {e}")
+        print(f"Nada foi publicado. Para reabrir a decisão: python main.py --thread {thread_id}")
+        raise SystemExit(1)
     except Exception as e:
         registrar(
             thread_id, "fim_execucao",

@@ -500,6 +500,16 @@ def no_visual(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     }
 
 
+class DeployNegado(RuntimeError):
+    """Recusa deliberada no gate humano.
+
+    Tipo próprio em vez de um RuntimeError genérico porque recusa não é falha:
+    quem trata o desfecho precisa distinguir "o humano decidiu não publicar" de
+    "o provedor caiu", e casar pelo texto da mensagem quebraria na primeira vez
+    que alguém reescrevesse a frase.
+    """
+
+
 def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
     """Gate human-in-the-loop: pausa a execução até um humano decidir."""
     vulns = state.get("vulnerabilidades") or []
@@ -517,7 +527,7 @@ def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
         }
     )
     if str(resposta).strip().lower() not in {"sim", "s", "yes", "aprovar"}:
-        raise RuntimeError("Deploy negado pelo aprovador humano.")
+        raise DeployNegado("Deploy negado pelo aprovador humano.")
     return {}
 
 

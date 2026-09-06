@@ -110,6 +110,14 @@ def _desfecho(marcos: list[dict], barras: list[dict]) -> str:
             estado = "em_curso"
         elif marco["evento"] == "fim_execucao":
             estado = marco["detalhe"].get("desfecho", "?")
+            # Histórico anterior ao desfecho `negado`: a recusa no gate era
+            # gravada como `erro` com a frase no campo. Reconhecer isso aqui
+            # mantém a série honesta sem reescrever medição já gravada — o
+            # arquivo de métricas é registro, não rascunho.
+            if estado == "erro" and "negado pelo aprovador" in str(
+                marco["detalhe"].get("erro", "")
+            ):
+                estado = "negado"
     if estado:
         return estado
     if any(b["evento"] == "deploy" and not b["erro"] for b in barras):
