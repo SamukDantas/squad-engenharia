@@ -114,10 +114,16 @@ def _desfecho(marcos: list[dict], barras: list[dict]) -> str:
             # gravada como `erro` com a frase no campo. Reconhecer isso aqui
             # mantém a série honesta sem reescrever medição já gravada — o
             # arquivo de métricas é registro, não rascunho.
-            if estado == "erro" and "negado pelo aprovador" in str(
-                marco["detalhe"].get("erro", "")
-            ):
+            legado = str(marco["detalhe"].get("erro", ""))
+            if estado == "erro" and "negado pelo aprovador" in legado:
                 estado = "negado"
+            # O único `input()` do pipeline é o do gate, então EOFError ali
+            # significa processo sem terminal — trabalho pronto, decisão
+            # pendente. Um `fim_execucao` posterior sobrescreve isto, porque os
+            # marcos são percorridos em ordem: thread que depois foi aprovada
+            # continua contando como deploy.
+            elif estado == "erro" and legado.startswith("EOFError"):
+                estado = "aguardando_gate"
     if estado:
         return estado
     if any(b["evento"] == "deploy" and not b["erro"] for b in barras):

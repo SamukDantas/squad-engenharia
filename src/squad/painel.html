@@ -79,6 +79,8 @@
   .selo.ruim { color: var(--vermelho); }
   .selo.neutro { color: var(--fraco); }
   .selo.vivo { color: var(--azul); }
+  /* Nem sucesso nem falha: parada esperando uma decisão humana. */
+  .selo.espera { color: var(--ambar); }
 
   .legenda { display: flex; gap: 16px; flex-wrap: wrap; color: var(--fraco); font-size: 12px; margin-top: 8px; }
   .legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
@@ -138,7 +140,10 @@ const corDoVeredito = (b) =>
   b.erro ? COR.erro : b.veredito === true ? COR.ok : b.veredito === false ? COR.ruim : COR.neutro;
 
 const seloDesfecho = (d) => {
-  const classe = { deploy: "ok", erro: "ruim", em_curso: "vivo" }[d] || "neutro";
+  const classe = {
+    deploy: "ok", erro: "ruim", em_curso: "vivo",
+    negado: "neutro", aguardando_gate: "espera",
+  }[d] || "neutro";
   return el("span", { class: `selo ${classe}`, text: d });
 };
 

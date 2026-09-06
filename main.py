@@ -65,7 +65,21 @@ def main() -> None:
         estado = grafo.get_state(config)
         if estado.next:  # pausado no gate humano
             print("\nGrafo pausado aguardando aprovação humana.")
-            resposta = input("Autorizar deploy? (sim/nao): ")
+            try:
+                resposta = input("Autorizar deploy? (sim/nao): ")
+            except EOFError:
+                # Processo sem entrada interativa (shell de background, CI,
+                # subprocesso). Não é falha: o trabalho está feito e aprovado,
+                # falta só a decisão. Gravar como `erro` faria a thread parecer,
+                # no painel, igual a uma que caiu no meio do caminho.
+                registrar(
+                    thread_id, "fim_execucao", desfecho="aguardando_gate",
+                    motivo="processo sem entrada interativa no gate humano",
+                )
+                print("\nSem entrada interativa para responder ao gate.")
+                print("Nada foi publicado — o trabalho está salvo e aprovado.")
+                print(f"Decida num terminal: python main.py --thread {thread_id}")
+                raise SystemExit(1)
             from langgraph.types import Command
             _rodar(grafo, Command(resume=resposta), config)
     except DeployNegado as e:
