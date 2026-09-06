@@ -29,14 +29,14 @@ from ..crews.planejamento import crew_planejamento
 from ..crews.qualidade import crew_revisao, crew_testes
 from ..deploy import executar_deploy
 from ..dominio import guards, orcamento, rotas
-from ..dominio.rotas import e_teste_padrao
 from ..dominio.vereditos import veredito_aprovado, veredito_sim
 from ..llm import zen_llm
-from ..metricas import medir, registrar
-from ..opencode import executar_opencode
+from ..adaptadores import perfis
+from ..adaptadores.metricas_json import medir, registrar
+from ..adaptadores.opencode_cli import executar_opencode
 from ..pentest import executar_pentest, habilitado as pentest_habilitado
 from ..resiliencia import com_retry
-from ..sandbox import executar_testes
+from ..adaptadores.testes import LIMITE_SAIDA, executar_testes
 from ..visual import executar_visual, habilitado as visual_habilitado
 from .state import EstadoProjeto
 
@@ -75,11 +75,17 @@ def _tid(config: RunnableConfig) -> str:
     return str(config["configurable"]["thread_id"])
 
 
-# ---------- helpers de workspace ----------
+def _perfil(state: EstadoProjeto):
+    """A stack desta execução, vinda do estado.
 
-# Diretórios de trabalho (caches de ferramentas e instruções da squad ao
-# executor) que não fazem parte da entrega.
-_IGNORAR_NO_WORKSPACE = {"__pycache__", ".pytest_cache", ".ruff_cache", ".squad", ".git"}
+    Do estado e não do ambiente: a thread atravessa vários processos, e uma
+    retomada depois de alguém editar o `.env` rodaria com a stack errada — o
+    mesmo motivo pelo qual o `thread_id` também mora aqui.
+    """
+    return perfis.obter(state.get("stack"))
+
+
+# ---------- helpers de workspace ----------
 
 # Rastro que o executor deixa ao rodar comandos (saída de pytest, log de
 # instalação): não é entrega, polui o dump enviado ao revisor e iria parar no
@@ -93,7 +99,7 @@ def _e_transitorio(rel: str) -> bool:
     return any(fnmatch(nome, padrao) for padrao in _ARQUIVOS_TRANSITORIOS)
 
 
-def _arquivos_do_workspace(workspace: str) -> list[str]:
+def _arquivos_do_workspace(workspace: str, perfil) -> list[str]:
     raiz = Path(workspace)
     return sorted(
         rel
@@ -101,8 +107,8 @@ def _arquivos_do_workspace(workspace: str) -> list[str]:
             str(p.relative_to(raiz)).replace("\\", "/")
             for p in raiz.rglob("*")
             if p.is_file()
-            and not _IGNORAR_NO_WORKSPACE.intersection(p.parts)
-            and p.suffix != ".pyc"
+            and not perfil.ignorar_no_workspace.intersection(p.parts)
+            and p.suffix not in perfil.extensoes_descartaveis
         )
         if not _e_transitorio(rel)
     )
@@ -119,15 +125,15 @@ def _tem_conteudo(workspace: str, rel: str) -> bool:
         return False
 
 
-def _conferir_entrega(arquivos: list[str], workspace: str) -> None:
+def _conferir_entrega(arquivos: list[str], workspace: str, perfil) -> None:
     """Lê o disco, monta o manifesto e deixa o domínio julgar."""
     manifesto = {a: _tem_conteudo(workspace, a) for a in arquivos}
-    falha = guards.conferir_entrega(manifesto, workspace, e_teste_padrao)
+    falha = guards.conferir_entrega(manifesto, workspace, perfil.e_teste)
     if falha:
         raise RuntimeError(falha)
 
 
-def _impressao_entrega(workspace: str) -> dict[str, str]:
+def _impressao_entrega(workspace: str, perfil) -> dict[str, str]:
     """Hash do conteúdo de cada arquivo da entrega, para comparar rodadas.
 
     Só a entrega: `tests/` é do QA e o executor é proibido de tocar, então
@@ -136,8 +142,8 @@ def _impressao_entrega(workspace: str) -> dict[str, str]:
     """
     raiz = Path(workspace)
     impressao: dict[str, str] = {}
-    for rel in _arquivos_do_workspace(workspace):
-        if e_teste_padrao(rel):
+    for rel in _arquivos_do_workspace(workspace, perfil):
+        if perfil.e_teste(rel):
             continue
         try:
             impressao[rel] = hashlib.sha256((raiz / rel).read_bytes()).hexdigest()
@@ -165,7 +171,7 @@ def _blocos_com_orcamento(
     return orcamento.blocos_com_orcamento(conteudos, arquivos, limite, rotulo)
 
 
-def _dump_codigo(workspace: str, arquivos: list[str]) -> str:
+def _dump_codigo(workspace: str, arquivos: list[str], perfil) -> str:
     """Conteúdo real da entrega para injetar na tarefa do revisor — artefato que
     decide roteamento não pode depender só de elos de contexto entre tarefas
     (RESILIENCIA.md, item 10).
@@ -182,18 +188,18 @@ def _dump_codigo(workspace: str, arquivos: list[str]) -> str:
     fila do manifesto: o revisor já recebe `saida_testes` em separado, então
     perder trecho de teste custa menos que perder o módulo que a spec descreve.
     """
-    ordem = orcamento.ordenar_para_dump(arquivos, e_teste_padrao)
+    ordem = orcamento.ordenar_para_dump(arquivos, perfil.e_teste)
     return _blocos_com_orcamento(
         workspace, ordem, LIMITE_DUMP_CODIGO, "Arquivos da entrega"
     )
 
 
-def _amostra_testes(workspace: str, arquivos: list[str]) -> str:
+def _amostra_testes(workspace: str, arquivos: list[str], perfil) -> str:
     """Amostra da suíte para o guard de critérios, com **todos** os arquivos
     representados — senão ele reprova por não ver testes que existem."""
     testes = [
         a for a in arquivos
-        if e_teste_padrao(a) and not orcamento.e_binario(a)
+        if perfil.e_teste(a) and not orcamento.e_binario(a)
     ]
     return _blocos_com_orcamento(
         workspace, testes, LIMITE_AMOSTRA_TESTES, "Arquivos de teste na suíte"
@@ -203,18 +209,25 @@ def _amostra_testes(workspace: str, arquivos: list[str]) -> str:
 # ---------- nós determinísticos ----------
 
 def no_triagem(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
-    """Valida a entrada, cria o workspace da execução e zera contadores."""
+    """Valida a entrada, resolve a stack, cria o workspace e zera contadores.
+
+    A stack é resolvida aqui de propósito: nome inválido reprova em 1s, na
+    triagem, e não lá no sandbox com uma imagem inexistente depois de o
+    planejamento já ter sido pago."""
     thread_id = _tid(config)
     with medir(thread_id, "triagem"):
         pedido = (state.get("pedido") or "").strip()
         if not pedido:
             raise ValueError("Pedido vazio — nada a fazer.")
+        perfil = perfis.obter(state.get("stack"))
         workspace = Path("workspace") / thread_id
         workspace.mkdir(parents=True, exist_ok=True)
+        print(f">>> Stack: {perfil.nome} (sandbox {perfil.imagem_sandbox})")
         print(f">>> Workspace desta execução: {workspace.resolve()}")
     return {
         "pedido": pedido,
         "thread_id": thread_id,
+        "stack": perfil.nome,
         "tentativas": 0,
         "testes_tentativas": 0,
         "revisao_tentativas": 0,
@@ -228,28 +241,34 @@ def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     """Veredito por execução: roda a suíte na jaula (sandbox Docker por
     padrão) e traduz o resultado em estado. Sem LLM."""
     thread_id = _tid(config)
-    with medir(thread_id, "executar_testes", runner=os.getenv("TEST_RUNNER", "docker")) as m:
-        resultado = executar_testes(state["workspace"], thread_id)
+    perfil = _perfil(state)
+    with medir(
+        thread_id, "executar_testes",
+        runner=os.getenv("TEST_RUNNER", "docker"), stack=perfil.nome,
+    ) as m:
+        resultado = executar_testes(state["workspace"], thread_id, perfil)
         m.update(
-            testes_ok=resultado["testes_ok"],
-            cobertura=resultado["cobertura"],
-            cobertura_pior=resultado["cobertura_pior"],
-            cobertura_pior_arquivo=resultado["cobertura_pior_arquivo"],
+            testes_ok=resultado.testes_ok,
+            cobertura=resultado.cobertura.total,
+            cobertura_pior=resultado.cobertura.pior,
+            cobertura_pior_arquivo=resultado.cobertura.pior_arquivo,
         )
 
-    saida = resultado["saida_testes"]
-    total, pior = resultado["cobertura"], resultado["cobertura_pior"]
-    pior_arquivo = resultado["cobertura_pior_arquivo"]
+    campos = resultado.como_estado(LIMITE_SAIDA)
+    saida = campos["saida_testes"]
+    total, pior = resultado.cobertura.total, resultado.cobertura.pior
+    pior_arquivo = resultado.cobertura.pior_arquivo
     # Dois pisos: o agregado pega suíte fraca no geral; o por módulo pega a
     # suíte que testa muito o que é fácil e ignora o arquivo central.
     agregado_ok = total >= _cobertura_minima()
     modulo_ok = pior >= _cobertura_minima_modulo()
     cobertura_ok = agregado_ok and modulo_ok
 
-    if not resultado["testes_ok"]:
+    if not resultado.testes_ok:
         feedback = (
             "Os testes automatizados FALHARAM. Corrija o código (ou os "
-            f"imports/estrutura) com base na saída real do pytest:\n{saida}"
+            f"imports/estrutura) com base na saída real do {perfil.runner}:"
+            f"\n{saida}"
         )
     elif not agregado_ok:
         # Problema do teste, não do código: quem reescreve é o QA.
@@ -273,7 +292,7 @@ def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     else:
         feedback = ""
     return {
-        **resultado,
+        **campos,
         "cobertura_ok": cobertura_ok,
         "feedback_qa": feedback,
         # Rodada movida por execução: se voltar ao desenvolvimento, a suíte é
@@ -297,7 +316,7 @@ def no_pentest(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
         return {"pentest_ok": True, "vulnerabilidades": []}
 
     with medir(thread_id, "pentest") as m:
-        resultado = executar_pentest(state["workspace"], thread_id)
+        resultado = executar_pentest(state["workspace"], thread_id, _perfil(state))
         vulns = resultado["vulnerabilidades"]
         m.update(
             pentest_ok=resultado["pentest_ok"],
@@ -387,7 +406,9 @@ def no_deploy(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     após aprovação humana explícita no gate."""
     thread_id = _tid(config)
     with medir(thread_id, "deploy") as m:
-        resultado = executar_deploy(state["workspace"], thread_id, state["pedido"])
+        resultado = executar_deploy(
+            state["workspace"], thread_id, state["pedido"], _perfil(state)
+        )
         m.update(deploy_ref=resultado.get("deploy_ref", ""))
     return resultado
 
@@ -436,7 +457,10 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     origem = state.get("origem_feedback") or "inicial"
     # Só numa rodada de correção há "antes" com que comparar; na inicial o
     # guard de entrega vazia já é o critério certo.
-    antes = _impressao_entrega(state["workspace"]) if origem != "inicial" else None
+    perfil = _perfil(state)
+    antes = (
+        _impressao_entrega(state["workspace"], perfil) if origem != "inicial" else None
+    )
     with medir(
         _tid(config), "desenvolvimento", executor=executor, origem=origem
     ) as m:
@@ -456,13 +480,15 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
             )
     # O que vale é o que está no disco: o manifesto do estado vem de uma
     # varredura determinística do workspace, não do texto do executor.
-    arquivos = _arquivos_do_workspace(state["workspace"])
-    _conferir_entrega(arquivos, state["workspace"])
+    arquivos = _arquivos_do_workspace(state["workspace"], perfil)
+    _conferir_entrega(arquivos, state["workspace"], perfil)
     if antes is not None:
-        _conferir_correcao(antes, _impressao_entrega(state["workspace"]), origem)
+        _conferir_correcao(
+            antes, _impressao_entrega(state["workspace"], perfil), origem
+        )
     return {
         "arquivos": arquivos,
-        "codigo": _dump_codigo(state["workspace"], arquivos),
+        "codigo": _dump_codigo(state["workspace"], arquivos, _perfil(state)),
         "tentativas": state["tentativas"] + 1,
         # Código novo, suíte nova: o laço de testes recomeça do zero.
         "testes_tentativas": 0,
@@ -486,10 +512,10 @@ def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         ), caro=True)
     # Revarre o workspace: os testes agora fazem parte da entrega e entram
     # no dump que o revisor recebe.
-    arquivos = _arquivos_do_workspace(state["workspace"])
+    arquivos = _arquivos_do_workspace(state["workspace"], _perfil(state))
     return {
         "arquivos": arquivos,
-        "codigo": _dump_codigo(state["workspace"], arquivos),
+        "codigo": _dump_codigo(state["workspace"], arquivos, _perfil(state)),
         "testes_tentativas": state.get("testes_tentativas", 0) + 1,
     }
 
@@ -499,7 +525,9 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
     suíte ignora os critérios de aceite. Espelha o guard de aderência —
     uma chamada barata antes de executar, porque reprovar aqui custa
     centavos e uma rodada inteira do laço custa a execução."""
-    testes = _amostra_testes(state["workspace"], state.get("arquivos", []))
+    testes = _amostra_testes(
+        state["workspace"], state.get("arquivos", []), _perfil(state)
+    )
     if not testes.strip():
         print(">>> Guard de critérios: nenhum arquivo de teste encontrado.")
         return {"testes_aderentes": False}
@@ -612,7 +640,9 @@ def rota_pos_validacao_spec(state: EstadoProjeto) -> str:
 
 
 def rota_pos_desenvolvimento(state: EstadoProjeto) -> str:
-    return _aplicar(state, rotas.pos_desenvolvimento(state, e_teste_padrao))
+    return _aplicar(
+        state, rotas.pos_desenvolvimento(state, _perfil(state).e_teste)
+    )
 
 
 def rota_pos_validacao_testes(state: EstadoProjeto) -> str:

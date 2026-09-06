@@ -5,6 +5,7 @@ from typing import TypedDict
 class EstadoProjeto(TypedDict, total=False):
     pedido: str          # demanda original do usuário
     thread_id: str       # id da execução; as funções de rota não recebem config
+    stack: str           # perfil da stack da entrega (python, nextjs, java)
     workspace: str       # caminho absoluto de workspace/<thread_id>/
     spec: str            # saída da crew de planejamento
     spec_coerente: bool  # veredito do guard de aderência ao pedido

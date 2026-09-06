@@ -66,16 +66,15 @@ squad-engenharia/
     ├── config/
     │   ├── agents.yaml         # definição dos agentes (papéis, goals, backstories)
     │   └── tasks.yaml          # definição das tarefas de cada crew
+    ├── portas/                 # as formas: perfil de stack, testes, executor, métricas
+    ├── adaptadores/            # implementações: perfil python, runner de testes, opencode, métricas
     ├── dominio/                # as decisões, sem nenhuma tecnologia
     │   ├── rotas.py            # para onde ir depois de cada nó, e os tetos
     │   ├── guards.py           # entrega vazia e rodada que não corrigiu nada
     │   ├── vereditos.py        # leitura de SIM/NAO e APROVADO/REPROVADO
     │   └── orcamento.py        # repartição do contexto enviado ao LLM
     ├── tools.py                # ferramentas de arquivo confinadas ao workspace
-    ├── opencode.py             # executor de desenvolvimento via OpenCode CLI
-    ├── sandbox.py              # jaula de execução dos testes (Docker/host)
     ├── visual.py               # renderiza a entrega e mede contraste (Docker)
-    ├── metricas.py             # métricas por execução (metrics/<thread_id>.json)
     ├── painel.py               # painel read-only sobre metrics/ (servidor + agregação)
     ├── painel.html             # as três telas do painel (sem build, sem CDN)
     ├── deploy.py               # deploy real (git commit + push da entrega)
@@ -185,6 +184,19 @@ gastar token:
 
 ```bash
 pytest
+```
+
+Entre o domínio e a tecnologia há **portas**, e elas existem só onde há variação
+real: o perfil da stack, quem executa a suíte, quem escreve o código e onde as
+métricas são gravadas. Publicação, pentest e LLM ficaram de fora de propósito —
+têm uma implementação só, e uma porta para uma implementação é fiação sem ganho.
+
+A stack da entrega é um **perfil**: imagem do sandbox, comando de teste, parser
+de cobertura, convenção de diretório de teste, `.gitignore` da entrega. Escolhida
+por execução e gravada no checkpoint:
+
+```bash
+python main.py --stack python "Criar endpoint de healthcheck"
 ```
 
 A camada de fora (`graph/workflow.py`) lê disco, chama adaptadores e traduz o
