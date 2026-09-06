@@ -53,14 +53,23 @@ def medir(thread_id: str, evento: str, **dados):
 
     Falha do nó também é registrada (com `erro`) antes de propagar: uma
     execução que quebrou é justamente a que se quer analisar depois.
+
+    Grava `inicio` além de `quando` (que é o fim do bloco). Reconstruir o
+    início como `quando - duracao_s` mistura dois relógios: `quando` é wall
+    clock e `duracao_s` vem do monotônico, que em algumas plataformas não
+    conta suspensão do sistema. Numa execução longa a diferença desloca a
+    barra na linha do tempo — e quem lê o histórico não deveria ter que
+    reconstruir o início.
     """
     inicio = time.monotonic()
+    inicio_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     extras: dict = {}
     try:
         yield extras
     except Exception as e:
         registrar(
             thread_id, evento,
+            inicio=inicio_iso,
             duracao_s=round(time.monotonic() - inicio, 1),
             erro=f"{type(e).__name__}: {e}"[:300],
             **dados, **extras,
@@ -68,6 +77,7 @@ def medir(thread_id: str, evento: str, **dados):
         raise
     registrar(
         thread_id, evento,
+        inicio=inicio_iso,
         duracao_s=round(time.monotonic() - inicio, 1),
         **dados, **extras,
     )
@@ -128,6 +138,13 @@ def resumo(thread_id: str) -> str:
                 for p in pentests
             )
         )
+    tetos = _dos("teto_atingido")
+    if tetos:
+        linhas.append(
+            "  Tetos atingidos             : "
+            + ", ".join(f"{t.get('laco')} ({t.get('limite')}x)" for t in tetos)
+        )
+
     total = sum(e.get("duracao_s", 0) for e in eventos)
     linhas.append(f"  Tempo total nos nós         : {total:.0f}s")
 
@@ -141,7 +158,11 @@ def resumo(thread_id: str) -> str:
             f" (maior: {maior['evento']} {maior.get('chars_contexto', 0):,})"
         )
 
-    caro = sorted(eventos, key=lambda e: e.get("duracao_s", 0), reverse=True)[:3]
+    # Só os nós medidos entram no ranking: marcos sem duração (`teto_atingido`,
+    # `fim_execucao`) apareceriam empatados em 0s e, numa execução curta,
+    # ocupariam o topo da lista.
+    medidos = [e for e in eventos if "duracao_s" in e]
+    caro = sorted(medidos, key=lambda e: e["duracao_s"], reverse=True)[:3]
     if caro:
         linhas.append(
             "  Nós mais lentos             : "

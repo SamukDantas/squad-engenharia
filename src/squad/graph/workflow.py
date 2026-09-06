@@ -29,7 +29,7 @@ from ..crews.planejamento import crew_planejamento
 from ..crews.qualidade import crew_revisao, crew_testes
 from ..deploy import executar_deploy
 from ..llm import zen_llm
-from ..metricas import medir
+from ..metricas import medir, registrar
 from ..opencode import executar_opencode
 from ..pentest import executar_pentest, habilitado as pentest_habilitado
 from ..resiliencia import com_retry
@@ -361,6 +361,7 @@ def no_triagem(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
         print(f">>> Workspace desta execução: {workspace.resolve()}")
     return {
         "pedido": pedido,
+        "thread_id": thread_id,
         "tentativas": 0,
         "testes_tentativas": 0,
         "revisao_tentativas": 0,
@@ -670,10 +671,29 @@ def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
 
 # ---------- roteamento ----------
 
+def _registrar_teto(state: EstadoProjeto, laco: str, limite: int) -> None:
+    """Circuit breaker disparado é o dado que mais explica uma execução: diz que
+    o laço parou por orçamento, não por mérito. Até aqui isso só existia no
+    stdout, e o stdout não sobrevive à execução.
+
+    As funções de rota recebem só o estado, não o `config` — daí o thread_id vir
+    do estado, posto na triagem. Em checkpoint antigo o campo não existe: o
+    registro é pulado sem quebrar o roteamento, que é o que importa.
+    """
+    thread_id = state.get("thread_id")
+    if not thread_id:
+        return
+    registrar(
+        thread_id, "teto_atingido", laco=laco, limite=limite,
+        tentativas=state.get("tentativas", 0),
+    )
+
+
 def rota_pos_validacao_spec(state: EstadoProjeto) -> str:
     if state.get("spec_coerente"):
         return "desenvolvimento"
     if state.get("spec_tentativas", 0) > MAX_REPLANEJAMENTOS:
+        _registrar_teto(state, "planejamento", MAX_REPLANEJAMENTOS)
         raise RuntimeError(
             "Planejamento produziu specs incoerentes com o pedido "
             f"{MAX_REPLANEJAMENTOS + 1} vezes seguidas. Interrompendo para "
@@ -717,6 +737,7 @@ def rota_pos_validacao_testes(state: EstadoProjeto) -> str:
     if state.get("testes_aderentes"):
         return "executar_testes"
     if state.get("testes_tentativas", 0) >= MAX_TESTES:
+        _registrar_teto(state, "escrever_testes", MAX_TESTES)
         print(">>> Guard de critérios: teto de reescritas atingido, seguindo assim mesmo.")
         return "executar_testes"
     return "escrever_testes"
@@ -726,6 +747,7 @@ def rota_pos_testes(state: EstadoProjeto) -> str:
     if not state.get("testes_ok"):
         if state["tentativas"] >= MAX_TENTATIVAS:
             # Circuit breaker: humano decide o que fazer com o trabalho reprovado.
+            _registrar_teto(state, "correcao", MAX_TENTATIVAS)
             return "aprovacao_humana"
         return "desenvolvimento"
     # Verdes, mas sem exercitar a entrega: problema do teste — laço curto,
@@ -749,12 +771,14 @@ def rota_pos_revisao(state: EstadoProjeto) -> str:
     if state.get("aprovado"):
         return "pentest"
     if state.get("revisao_tentativas", 0) >= MAX_REVISOES:
+        _registrar_teto(state, "revisao", MAX_REVISOES)
         print(
             f">>> Revisão reprovou {MAX_REVISOES}x: teto de rodadas por opinião "
             "atingido, levando ao gate humano."
         )
         return "aprovacao_humana"
     if state["tentativas"] >= MAX_TENTATIVAS:
+        _registrar_teto(state, "correcao", MAX_TENTATIVAS)
         return "aprovacao_humana"
     return "desenvolvimento"
 
@@ -771,12 +795,14 @@ def rota_pos_pentest(state: EstadoProjeto) -> str:
     if state.get("pentest_ok"):
         return "aprovacao_humana"
     if state.get("pentest_tentativas", 0) >= MAX_PENTEST:
+        _registrar_teto(state, "pentest", MAX_PENTEST)
         print(
             f">>> Pentest reprovou {MAX_PENTEST}x: teto de remediações atingido, "
             "levando ao gate humano com o relatório."
         )
         return "aprovacao_humana"
     if state["tentativas"] >= MAX_TENTATIVAS:
+        _registrar_teto(state, "correcao", MAX_TENTATIVAS)
         return "aprovacao_humana"
     return "desenvolvimento"
 
