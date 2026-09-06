@@ -183,3 +183,32 @@ def test_cada_stack_tem_imagem_e_dockerfile_proprios():
 def test_so_o_python_permite_runner_de_host():
     """O runner de host roda a suíte no interpretador da própria squad."""
     assert [n for n in perfis.nomes() if perfis.obter(n).permite_host] == ["python"]
+
+
+# ---------- config do vitest: duas lições pagas numa execução real ----------
+
+def test_config_do_vitest_liga_o_jsx_automatico(tmp_path):
+    """Sem `jsx: "automatic"`, o esbuild compila JSX para `React.createElement`
+    e todo componente que não importa React quebra com "React is not defined".
+    Medido: 11 testes de componente vermelhos numa entrega cujos 27 testes de
+    lógica pura passavam — falha de ambiente disfarçada de falha de código."""
+    perfis.obter("nextjs").preparar_workspace(str(tmp_path))
+    config = (tmp_path / perfil_nextjs.ARQUIVO_CONFIG).read_text(encoding="utf-8")
+    assert '"automatic"' in config
+
+
+def test_config_do_vitest_exclui_arquivos_de_config_da_cobertura(tmp_path):
+    """RESILIENCIA 20 na outra stack: arquivo nunca importado fica em 0% e
+    sequestra o piso por módulo. Medido: `next.config.mjs` apareceu como pior
+    módulo a 0,0%, e o QA seria mandado testar um arquivo de configuração."""
+    perfis.obter("nextjs").preparar_workspace(str(tmp_path))
+    config = (tmp_path / perfil_nextjs.ARQUIVO_CONFIG).read_text(encoding="utf-8")
+    for padrao in ("**/*.config.*", ".squad/**", "**/node_modules/**"):
+        assert padrao in config, padrao
+
+
+def test_config_fica_fora_da_entrega(tmp_path):
+    """Em `.squad/`, como o coveragerc do perfil Python: a squad configura o
+    runner sem acrescentar arquivo à entrega que vai ao deploy."""
+    assert perfil_nextjs.ARQUIVO_CONFIG.startswith(".squad/")
+    assert ".squad" in perfis.obter("nextjs").ignorar_no_workspace

@@ -75,6 +75,24 @@ def _tid(config: RunnableConfig) -> str:
     return str(config["configurable"]["thread_id"])
 
 
+def _do_perfil(perfil) -> dict:
+    """Campos do perfil que **toda** crew recebe.
+
+    Num só lugar de propósito. A primeira versão passava `stack` apenas às
+    crews que pareciam precisar, e a de planejamento ficou de fora — o
+    `tasks.yaml` cita `{stack}` na tarefa de arquitetura, e o CrewAI só levanta
+    na interpolação, no meio da execução, depois da triagem já paga. Distribuir
+    tudo para todas custa nada e tira a classe inteira de erro do caminho.
+    """
+    return {
+        "stack": perfil.nome,
+        "runner": perfil.runner,
+        "libs_permitidas": perfil.libs_permitidas,
+        "instrucoes_qa": perfil.instrucoes_qa,
+        "exemplo_run_json": perfil.exemplo_run_json,
+    }
+
+
 def _perfil(state: EstadoProjeto):
     """A stack desta execução, vinda do estado.
 
@@ -419,7 +437,9 @@ def no_planejamento(state: EstadoProjeto, config: RunnableConfig) -> EstadoProje
     with medir(_tid(config), "planejamento"):
         resultado = com_retry(
             "planejamento",
-            lambda: crew_planejamento().kickoff(inputs={"pedido": state["pedido"]}),
+            lambda: crew_planejamento().kickoff(
+                inputs={**_do_perfil(_perfil(state)), "pedido": state["pedido"]}
+            ),
             caro=True,
         )
     return {
@@ -472,10 +492,9 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         elif executor == "crews":
             crew_desenvolvimento(state["workspace"]).kickoff(
                 inputs={
+                    **_do_perfil(perfil),
                     "spec": state["spec"],
                     "feedback_qa": feedback or "Nenhum — primeira rodada.",
-                    "stack": perfil.nome,
-                    "libs_permitidas": perfil.libs_permitidas,
                 }
             )
         else:
@@ -510,11 +529,10 @@ def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         ))
         com_retry("escrita de testes", lambda: crew_testes(state["workspace"]).kickoff(
             inputs={
+                **_do_perfil(perfil),
                 "spec": state["spec"],
                 "arquivos": arquivos_antes or "(workspace vazio)",
                 "feedback_qa": state.get("feedback_qa", "") or "Nenhum — primeira rodada.",
-                "libs_permitidas": perfil.libs_permitidas,
-                "instrucoes_qa": perfil.instrucoes_qa,
             }
         ), caro=True)
     # Revarre o workspace: os testes agora fazem parte da entrega e entram
@@ -585,6 +603,7 @@ def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
         ))
         resultado = com_retry("revisão", lambda: crew_revisao().kickoff(
             inputs={
+                **_do_perfil(_perfil(state)),
                 "codigo": state["codigo"],
                 "spec": state["spec"],
                 "saida_testes": state.get("saida_testes", ""),

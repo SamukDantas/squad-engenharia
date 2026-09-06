@@ -15,6 +15,7 @@ comunidade — e é exatamente o caso que quebrava três guards quando o prefixo
 `tests/` estava fixo no grafo.
 """
 import json
+from pathlib import Path
 
 from ..portas.perfil import Cobertura, PerfilStack
 
@@ -44,10 +45,47 @@ def _e_teste(caminho: str) -> bool:
     return caminho.startswith("tests/") or caminho.endswith(_SUFIXOS_TESTE)
 
 
+# Config mínima do vitest, escrita pela squad dentro de `.squad/` — fora da
+# entrega, como o `coveragerc` do perfil Python. Existe por um motivo só, medido
+# numa execução real: sem `jsx: "automatic"`, o esbuild compila JSX para
+# `React.createElement` (modo clássico) e todo componente que não importa React
+# explicitamente quebra com "React is not defined". Foram 11 testes de
+# componente vermelhos numa entrega em que os 27 de lógica pura passaram — falha
+# de ambiente disfarçada de falha de código, que o laço de correção tentaria
+# consertar no lugar errado.
+#
+# A lista de exclusão da cobertura é o espelho do `omit` do perfil Python, e
+# existe pela mesma lição (RESILIENCIA.md, item 20): arquivo que nunca é
+# importado fica em 0% e sequestra o piso por módulo — o QA seria mandado
+# escrever teste para um arquivo de configuração. Medido na mesma execução:
+# `next.config.mjs` apareceu como pior módulo a 0,0%.
+#
+# Objeto simples em vez de `defineConfig`: sem import, sem resolução de módulo a
+# partir de um diretório que não é o do projeto.
+_VITEST_CONFIG = """export default {
+  esbuild: { jsx: "automatic" },
+  test: {
+    coverage: {
+      exclude: [
+        "**/node_modules/**",
+        ".squad/**",
+        "**/*.test.*",
+        "**/*.spec.*",
+        "**/*.config.*",
+        "**/.next/**",
+        "**/dist/**"
+      ]
+    }
+  }
+};
+"""
+ARQUIVO_CONFIG = ".squad/vitest.config.mjs"
+
+
 def _preparar(workspace: str) -> None:
-    """Nada a escrever: a configuração do vitest vai por flag de linha de
-    comando, para a entrega não precisar carregar um arquivo de config que o
-    executor poderia sobrescrever."""
+    raiz = Path(workspace) / ".squad"
+    raiz.mkdir(parents=True, exist_ok=True)
+    (Path(workspace) / ARQUIVO_CONFIG).write_text(_VITEST_CONFIG, encoding="utf-8")
 
 
 def _flags_cobertura(dir_saida: str) -> str:
@@ -65,14 +103,18 @@ def _flags_cobertura(dir_saida: str) -> str:
 def _comando_container(dir_saida: str) -> str:
     return (
         f"cp -r /src /app/projeto && cd /app/projeto && "
-        f"{VITEST} run --root . {_flags_cobertura(dir_saida)}"
+        f"{VITEST} run --root . --config {ARQUIVO_CONFIG} "
+        f"{_flags_cobertura(dir_saida)}"
     )
 
 
 def _comando_host(dir_saida: str) -> list[str]:
     # Inalcançável: `permite_host=False`. Existe para o perfil ser completo e
     # para o erro vir da checagem explícita, não de um AttributeError.
-    return ["vitest", "run", "--root", ".", *_flags_cobertura(dir_saida).split()]
+    return [
+        "vitest", "run", "--root", ".", "--config", ARQUIVO_CONFIG,
+        *_flags_cobertura(dir_saida).split(),
+    ]
 
 
 def _ler_cobertura(texto: str) -> Cobertura:

@@ -68,10 +68,9 @@ consolidar_entrega:
     estrutura de arquivos e as instruções de execução.
     Escreva também `.squad/run.json` declarando como subir a aplicação como
     servidor HTTP, para o pipeline de segurança atacá-la. Formato exato:
-    {"cmd": ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"],
-    "port": 8000, "health_path": "/docs"}. Use o comando real desta entrega
-    (módulo/porta corretos; Flask usa flask --app <mod> run --host 0.0.0.0
-    --port <p>); health_path é uma rota que responde com a app no ar.
+    {exemplo_run_json}
+    Use o comando real desta entrega (módulo e porta corretos); health_path
+    é uma rota que responde com a app no ar.
   expected_output: >
     Manifesto final dos arquivos da entrega, com o README.md e o
     .squad/run.json incluídos.
@@ -100,7 +99,7 @@ escrever_testes:
 revisar:
   description: >
     Os testes automatizados JÁ FORAM EXECUTADOS pelo pipeline e PASSARAM;
-    a saída real do pytest está abaixo. Sua revisão cobre o que a execução
+    a saída real do {runner} está abaixo. Sua revisão cobre o que a execução
     não pega: legibilidade, segurança e aderência do código à spec.
 
     REPROVAR custa uma rodada inteira de desenvolvimento, então o veredito
@@ -124,7 +123,7 @@ revisar:
     Conclua com o veredito exato APROVADO ou REPROVADO na última linha. Ao
     reprovar, liste antes do veredito apenas as correções bloqueantes.
     Revisão da rodada anterior: {revisao_anterior}
-    Saída do pytest: {saida_testes}
+    Saída do {runner}: {saida_testes}
     Código (lido do workspace): {codigo}
     Spec: {spec}
   expected_output: >
