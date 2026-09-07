@@ -19,7 +19,13 @@ from pathlib import Path
 
 from ..portas.perfil import Cobertura, PerfilStack
 
-RELATORIO = "coverage-summary.json"
+# O relatório vai para um subdiretório **dentro** do diretório montado, não na
+# raiz dele. O vitest limpa o `reportsDirectory` antes de escrever, e a raiz é o
+# ponto de montagem — `rmdir` nele falha com EACCES e derruba a execução. Nem
+# `--coverage.clean=false` nem `clean` no config impedem a limpeza no caminho de
+# falha; num subdiretório ela é legítima e funciona.
+SUBDIR_COBERTURA = "cov"
+RELATORIO = f"{SUBDIR_COBERTURA}/coverage-summary.json"
 
 # Diretório onde a imagem instala as dependências, um nível acima do projeto.
 NODE_MODULES = "/app/node_modules"
@@ -55,6 +61,15 @@ def _e_teste(caminho: str) -> bool:
 # de ambiente disfarçada de falha de código, que o laço de correção tentaria
 # consertar no lugar errado.
 #
+# O alias `@/` é convenção do Next.js: o `tsconfig.json` o declara em `paths` e
+# o `next build` o resolve nativamente, mas o vitest não lê `paths` do tsconfig.
+# Sem este mapeamento a suíte quebra com "Failed to load url @/data/..." — e o
+# laço de correção fica num beco, porque o QA escreveu os testes com o alias e o
+# executor é proibido de editar testes. Medido numa execução real: 3 arquivos de
+# teste sem nenhum teste coletado, com o build passando.
+#
+# O config mora em `.squad/`, então `..` é a raiz do projeto.
+#
 # A lista de exclusão da cobertura é o espelho do `omit` do perfil Python, e
 # existe pela mesma lição (RESILIENCIA.md, item 20): arquivo que nunca é
 # importado fica em 0% e sequestra o piso por módulo — o QA seria mandado
@@ -63,8 +78,13 @@ def _e_teste(caminho: str) -> bool:
 #
 # Objeto simples em vez de `defineConfig`: sem import, sem resolução de módulo a
 # partir de um diretório que não é o do projeto.
-_VITEST_CONFIG = """export default {
+_VITEST_CONFIG = """import { fileURLToPath } from "node:url";
+
+export default {
   esbuild: { jsx: "automatic" },
+  resolve: {
+    alias: { "@": fileURLToPath(new URL("..", import.meta.url)) }
+  },
   test: {
     coverage: {
       exclude: [
@@ -90,14 +110,10 @@ def _preparar(workspace: str) -> None:
 
 
 def _flags_cobertura(dir_saida: str) -> str:
-    # `clean=false` é obrigatório, não preferência: o diretório de saída é um
-    # bind mount, e a limpeza padrão do vitest tenta `rmdir` nele — o que falha
-    # com EACCES e derruba a execução antes do primeiro teste. A limpeza também
-    # seria redundante: o runner já apaga o relatório da rodada anterior.
     return (
         "--coverage.enabled --coverage.provider=v8 "
-        "--coverage.reporter=json-summary --coverage.clean=false "
-        f"--coverage.reportsDirectory={dir_saida}"
+        "--coverage.reporter=json-summary "
+        f"--coverage.reportsDirectory={dir_saida}/{SUBDIR_COBERTURA}"
     )
 
 

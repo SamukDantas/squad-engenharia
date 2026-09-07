@@ -245,3 +245,25 @@ def test_falha_de_build_e_um_desfecho_distinto():
         falha_de_build=True,
     )
     assert build.falha_de_build is True and build.testes_ok is False
+
+
+def test_config_do_vitest_resolve_o_alias_do_nextjs(tmp_path):
+    """`@/` é convenção do Next.js: o tsconfig o declara em `paths` e o
+    `next build` o resolve, mas o vitest não lê `paths`. Sem o mapeamento a
+    suíte quebra com "Failed to load url @/data/..." — e o laço fica num beco,
+    porque o QA escreveu os testes com o alias e o executor não pode editá-los."""
+    perfis.obter("nextjs").preparar_workspace(str(tmp_path))
+    config = (tmp_path / perfil_nextjs.ARQUIVO_CONFIG).read_text(encoding="utf-8")
+    assert '"@"' in config and "import.meta.url" in config
+
+
+def test_relatorio_de_cobertura_nao_fica_na_raiz_do_mount():
+    """O vitest limpa o `reportsDirectory` antes de escrever, e a raiz é o ponto
+    de montagem: `rmdir` nela falha com EACCES e derruba a execução. Nem a flag
+    nem o `clean` no config impedem isso no caminho de falha — num subdiretório
+    a limpeza é legítima."""
+    perfil = perfis.obter("nextjs")
+    assert "/" in perfil.relatorio_cobertura, perfil.relatorio_cobertura
+    assert perfil.relatorio_cobertura.startswith(perfil_nextjs.SUBDIR_COBERTURA + "/")
+    cmd = perfil.comando_container("/out")
+    assert f"/out/{perfil_nextjs.SUBDIR_COBERTURA}" in cmd
