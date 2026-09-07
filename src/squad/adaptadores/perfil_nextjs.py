@@ -204,6 +204,7 @@ PERFIL = PerfilStack(
     extensoes_descartaveis=frozenset({".tsbuildinfo", ".map"}),
     gitignore_entrega=_GITIGNORE,
     imagem_alvo="squad-target-nextjs:latest",
+    preparo_alvo=f"{NEXT} build && ",
     dockerfile_alvo="Dockerfile.target-nextjs",
     libs_permitidas=_LIBS,
     instrucoes_qa=(

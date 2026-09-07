@@ -74,6 +74,7 @@ squad-engenharia/
     │   ├── vereditos.py        # leitura de SIM/NAO e APROVADO/REPROVADO
     │   └── orcamento.py        # repartição do contexto enviado ao LLM
     ├── tools.py                # ferramentas de arquivo confinadas ao workspace
+    ├── alvo.py                 # sobe a entrega como servidor em rede isolada
     ├── visual.py               # renderiza a entrega e mede contraste (Docker)
     ├── painel.py               # painel read-only sobre metrics/ (servidor + agregação)
     ├── painel.html             # as três telas do painel (sem build, sem CDN)
@@ -170,10 +171,25 @@ Há uma checagem de causa raiz separada: página que não declara
 junto com o tema do sistema enquanto as cores de texto ficam paradas. É o
 defeito exato que motivou o nó.
 
-**Escopo:** renderiza a entrega **estática**. O que só aparece depois de um
-`fetch` (linhas de tabela, gráficos com dados) não é medido — sem rede, o fetch
-não completa. Cobre o esqueleto da página, que é onde mora o defeito de tema e
-contraste. Não substitui olho humano em layout. Entrega sem HTML passa direto.
+**Dois modos, e quem escolhe é a entrega, não a configuração:**
+
+- **HTML estático no workspace** → aberto por `file://`, com `--network none`.
+  É o caso de entregas Python que servem uma página pronta.
+- **Entrega que só existe servida** (Next.js e afins, que não deixam `.html` no
+  workspace) → a squad **sobe a aplicação** numa bridge Docker `--internal`, sem
+  rota para a internet, e renderiza o que o servidor devolve. Mede a raiz e um
+  nível de links da mesma origem: a raiz costuma ser landing, e numa entrega
+  real o dashboard morava em `/dashboard`.
+
+A jaula muda de forma, não de princípio — é a mesma contenção do pentest, e pela
+mesma razão: o alvo *precisa* estar alcançável, então o que se corta é a saída.
+A infraestrutura de subir o alvo é compartilhada pelos dois nós
+([`src/squad/alvo.py`](src/squad/alvo.py)).
+
+**Só o que é HTML é julgado.** Uma entrega de API responde JSON, e medir
+contraste num corpo JSON reprovaria toda API por ruído. Sem nenhuma rota HTML, o
+nó passa por ausência de objeto — não por aprovação. Entrega sem HTML e sem
+`run.json` passa direto, sem sequer chamar o Docker.
 
 ## Testes da squad
 

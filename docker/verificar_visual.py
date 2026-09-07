@@ -9,11 +9,20 @@ Mede em vez de opinar: as razões saem de `getComputedStyle` num motor de
 layout de verdade, pelo mesmo motivo que o veredito dos testes sai do exit code
 do pytest. Um revisor LLM lê `color: #1f2937` e não sabe o que aparece atrás.
 
-Emite JSON no stdout. Nada aqui fala com a rede: o container roda com
-`--network none` e as páginas são abertas por `file://`.
+Dois modos, escolhidos pelo argumento:
+
+- **caminho**: entrega com HTML estático, aberta por `file://`, num container
+  com `--network none`;
+- **URL**: entrega que só existe servida (Next.js e afins). O container roda
+  numa bridge interna, sem rota para a internet, e o alvo é a própria entrega
+  no ar. Mede a raiz e um nível de links da mesma origem — a raiz costuma ser
+  landing, e numa entrega real o dashboard morava em `/dashboard`.
+
+Emite JSON no stdout.
 """
 import json
 import sys
+import time
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -25,6 +34,10 @@ TEMAS = ("light", "dark")
 CANVAS_PADRAO = {"light": (255, 255, 255), "dark": (18, 18, 18)}
 LIMITE_ACHADOS = 25       # por página e tema — o brief de correção precisa caber
 IGNORAR = {"tests", ".squad", "node_modules", "__pycache__", ".git"}
+
+# Modo URL (SPA): a entrega não tem HTML estático, então é renderizada de pé.
+ESPERA_ALVO = 90          # s até desistir de o servidor responder
+LIMITE_ROTAS = 5          # rotas visitadas além da raiz
 
 # WCAG 2.1 AA.
 RAZAO_TEXTO_NORMAL = 4.5
@@ -160,7 +173,57 @@ def _dedup(achados: list[dict]) -> list[dict]:
     return unicos
 
 
+def _medir(navegador, alvo: str, rotulo: str, problemas: list) -> tuple[list, bool]:
+    """Abre `alvo` nos dois temas e acumula os achados.
+
+    Devolve os temas sem fundo declarado e se a resposta era HTML. O segundo
+    importa: uma entrega de API responde JSON, e medir contraste num corpo JSON
+    reprovaria toda API por ruído. O que não é HTML não é julgado aqui — nem
+    como achado, nem como página.
+    """
+    sem_fundo, era_html = [], False
+    for tema in TEMAS:
+        ctx = navegador.new_context(color_scheme=tema)
+        aba = ctx.new_page()
+        try:
+            resposta = aba.goto(alvo, wait_until="load", timeout=20_000)
+            tipo = (resposta.headers.get("content-type", "") if resposta else "")
+            if "html" not in tipo.lower():
+                continue
+            era_html = True
+            # A entrega pode preencher a página por fetch; este respiro deixa o
+            # que é síncrono assentar antes de medir.
+            aba.wait_for_timeout(400)
+            medida = aba.evaluate(_JS_MEDIR, CANVAS_PADRAO[tema])
+        except Exception as e:  # página que nem abre é achado, não crash
+            problemas.append({
+                "tipo": "pagina_nao_renderiza", "arquivo": rotulo, "tema": tema,
+                "detalhe": f"{type(e).__name__}: {e}"[:200],
+            })
+            continue
+        finally:
+            ctx.close()
+
+        if not medida["fundo_declarado"]:
+            sem_fundo.append(tema)
+        for achado in medida["achados"][:LIMITE_ACHADOS]:
+            problemas.append({**achado, "arquivo": rotulo, "tema": tema})
+    return sem_fundo, era_html
+
+
+def _sem_fundo(rotulo: str) -> dict:
+    return {
+        "tipo": "fundo_nao_declarado", "arquivo": rotulo, "tema": "ambos",
+        "detalhe": (
+            "a página não declara background-color no body nem na raiz, então "
+            "herda o canvas do navegador e inverte com o tema do sistema "
+            "enquanto as cores de texto ficam paradas"
+        ),
+    }
+
+
 def verificar(raiz: Path) -> dict:
+    """Modo arquivo: entrega com HTML estático, aberta por file://."""
     paginas = _paginas(raiz)
     if not paginas:
         return {"paginas": 0, "problemas": []}
@@ -171,51 +234,99 @@ def verificar(raiz: Path) -> dict:
         try:
             for pagina in paginas:
                 rel = str(pagina.relative_to(raiz)).replace("\\", "/")
-                sem_fundo_em = []
-                for tema in TEMAS:
-                    ctx = navegador.new_context(color_scheme=tema)
-                    aba = ctx.new_page()
-                    try:
-                        aba.goto(pagina.as_uri(), wait_until="load", timeout=15_000)
-                        # A entrega pode preencher a página por fetch; sem rede o
-                        # fetch falha rápido, e este respiro deixa o que é
-                        # síncrono assentar antes de medir.
-                        aba.wait_for_timeout(300)
-                        medida = aba.evaluate(_JS_MEDIR, CANVAS_PADRAO[tema])
-                    except Exception as e:  # página que nem abre é achado, não crash
-                        problemas.append({
-                            "tipo": "pagina_nao_renderiza", "arquivo": rel, "tema": tema,
-                            "detalhe": f"{type(e).__name__}: {e}"[:200],
-                        })
-                        continue
-                    finally:
-                        ctx.close()
-
-                    if not medida["fundo_declarado"]:
-                        sem_fundo_em.append(tema)
-                    for achado in medida["achados"][:LIMITE_ACHADOS]:
-                        problemas.append({**achado, "arquivo": rel, "tema": tema})
-
-                # Uma vez por página: a falta de fundo não é um defeito por tema,
-                # é o defeito que faz os dois temas divergirem.
-                if sem_fundo_em:
-                    problemas.append({
-                        "tipo": "fundo_nao_declarado", "arquivo": rel, "tema": "ambos",
-                        "detalhe": (
-                            "a página não declara background-color no body nem na "
-                            "raiz, então herda o canvas do navegador e inverte com "
-                            "o tema do sistema enquanto as cores de texto ficam paradas"
-                        ),
-                    })
+                sem_fundo, _ = _medir(navegador, pagina.as_uri(), rel, problemas)
+                if sem_fundo:
+                    problemas.append(_sem_fundo(rel))
         finally:
             navegador.close()
-
     return {"paginas": len(paginas), "problemas": _dedup(problemas)}
 
 
+def _esperar_alvo(aba, base: str) -> None:
+    """O servidor pode ainda estar subindo — `next build` sozinho leva dezenas
+    de segundos. Repete o goto até responder, em vez de exigir um probe com
+    curl numa imagem que não tem curl."""
+    limite = time.monotonic() + ESPERA_ALVO
+    ultimo = ""
+    while time.monotonic() < limite:
+        try:
+            aba.goto(base, wait_until="load", timeout=10_000)
+            return
+        except Exception as e:
+            ultimo = f"{type(e).__name__}: {e}"[:200]
+            time.sleep(3)
+    raise RuntimeError(
+        f"O alvo não respondeu em {base} dentro de {ESPERA_ALVO}s. A entrega não "
+        f"subiu — não é veredito visual. Último erro: {ultimo}"
+    )
+
+
+def _rotas(aba, base: str) -> list[str]:
+    """Um nível de links da raiz, só da mesma origem.
+
+    Existe porque a raiz costuma ser landing: numa entrega real o dashboard
+    morava em `/dashboard`, e medir só `/` teria aprovado a página que ninguém
+    olha. Um nível é o corte — crawler de verdade é outro problema.
+    """
+    encontrados = aba.evaluate(
+        """() => Array.from(document.querySelectorAll('a[href]'))
+                .map(a => a.href)
+                .filter(h => h.startsWith(location.origin))"""
+    )
+    vistos, rotas = {base.rstrip("/")}, []
+    for url in encontrados:
+        limpo = url.split("#")[0].rstrip("/")
+        if limpo and limpo not in vistos:
+            vistos.add(limpo)
+            rotas.append(limpo)
+        if len(rotas) >= LIMITE_ROTAS:
+            break
+    return rotas
+
+
+def verificar_url(base: str) -> dict:
+    """Modo SPA: a entrega está de pé, e o que se mede é o que o servidor
+    devolve. É o único caminho possível em Next.js, que não deixa HTML estático
+    no workspace — ali o nó virava no-op silencioso justamente na stack onde
+    seria mais útil."""
+    problemas: list[dict] = []
+    with sync_playwright() as pw:
+        navegador = pw.chromium.launch(args=["--no-sandbox"])
+        try:
+            ctx = navegador.new_context()
+            aba = ctx.new_page()
+            try:
+                _esperar_alvo(aba, base)
+                rotas = _rotas(aba, base)
+            finally:
+                ctx.close()
+
+            medidas = 0
+            for url in [base] + rotas:
+                rotulo = url[len(base.rstrip("/")):] or "/"
+                sem_fundo, era_html = _medir(navegador, url, rotulo, problemas)
+                if not era_html:
+                    continue
+                medidas += 1
+                if sem_fundo:
+                    problemas.append(_sem_fundo(rotulo))
+        finally:
+            navegador.close()
+
+    # Nenhuma rota devolveu HTML: é uma API, não uma interface. Verde por
+    # ausência de objeto, não por aprovação — reprovar aqui transformaria o nó
+    # num requisito de front-end que a spec pode não ter.
+    if medidas == 0:
+        return {"paginas": 0, "problemas": []}
+    return {"paginas": medidas, "problemas": _dedup(problemas)}
+
+
 def main() -> None:
-    raiz = Path(sys.argv[1] if len(sys.argv) > 1 else "/entrega")
-    print(json.dumps(verificar(raiz), ensure_ascii=False))
+    alvo = sys.argv[1] if len(sys.argv) > 1 else "/entrega"
+    # Um argumento só, com o modo implícito no formato: caminho abre por
+    # file://, URL renderiza a entrega de pé.
+    medida = verificar_url(alvo) if alvo.startswith("http") else verificar(Path(alvo))
+    print(json.dumps(medida, ensure_ascii=False))
 
 
 if __name__ == "__main__":

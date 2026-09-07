@@ -105,6 +105,11 @@ class PerfilStack:
     gitignore_entrega: str = ""
     imagem_alvo: str = ""            # imagem que sobe a entrega para o pentest
     dockerfile_alvo: str = ""        # citado na mensagem de erro de imagem ausente
+    # Rodado dentro do container do alvo, antes do comando do `run.json`.
+    # `next start` sem `next build` não sobe, e `java -cp target/classes` sem
+    # `mvn compile` não acha classe nenhuma. Termina em `&& ` porque é
+    # concatenado antes do `exec`.
+    preparo_alvo: str = ""
 
     # ---- prompts ----
     libs_permitidas: str = ""        # ambiente pré-provisionado, citado ao executor

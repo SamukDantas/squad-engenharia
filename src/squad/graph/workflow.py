@@ -378,12 +378,13 @@ def no_visual(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     (VISUAL_HABILITADO), curto-circuita verde para não mudar o comportamento de
     quem ainda não construiu a imagem."""
     thread_id = _tid(config)
+    perfil = _perfil(state)
     if not visual_habilitado():
         print(">>> Verificação visual desligada (VISUAL_HABILITADO=0) — pulando.")
         return {"visual_ok": True, "problemas_visuais": []}
 
     with medir(thread_id, "visual") as m:
-        resultado = executar_visual(state["workspace"], thread_id)
+        resultado = executar_visual(state["workspace"], thread_id, perfil)
         m.update(
             visual_ok=resultado["visual_ok"],
             problemas=len(resultado["problemas"]),

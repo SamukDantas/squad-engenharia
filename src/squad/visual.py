@@ -25,6 +25,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from . import alvo as infra
+
 IMAGEM = "squad-visual:latest"
 
 # Renderizar é rápido (duas passadas por página num Chromium já quente), mas o
@@ -46,32 +48,13 @@ def habilitado() -> bool:
     return (os.getenv("VISUAL_HABILITADO") or "0").strip() == "1"
 
 
-def _checar_docker_e_imagem() -> None:
-    try:
-        r = subprocess.run(
-            ["docker", "info", "--format", "{{.ServerVersion}}"],
-            capture_output=True, text=True, timeout=30,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        raise RuntimeError(
-            "Verificação visual exige Docker e ele não respondeu. Suba o Docker, "
-            "ou desligue com VISUAL_HABILITADO=0 no .env."
-        )
-    if r.returncode != 0:
-        raise RuntimeError(
-            f"Verificação visual exige Docker: {(r.stderr or r.stdout).strip()[:200]}"
-        )
+_DESLIGAR = "desligue com VISUAL_HABILITADO=0 no .env"
 
-    r = subprocess.run(
-        ["docker", "image", "inspect", IMAGEM],
-        capture_output=True, text=True, timeout=60,
-    )
-    if r.returncode != 0:
-        raise RuntimeError(
-            f"Imagem {IMAGEM} não encontrada. Construa uma vez:\n"
-            f"  docker build -f Dockerfile.visual -t squad-visual:latest .\n"
-            "Ou desligue com VISUAL_HABILITADO=0 no .env."
-        )
+
+def _checar_docker_e_imagem(*imagens) -> None:
+    infra.checar_docker("A verificação visual", _DESLIGAR)
+    for imagem, dockerfile in imagens:
+        infra.checar_imagem(imagem, dockerfile, _DESLIGAR)
 
 
 def _paginas(workspace: str) -> list[str]:
@@ -116,55 +99,109 @@ def _formatar_feedback(problemas: list[dict]) -> str:
     return "\n".join(linhas)
 
 
-def executar_visual(workspace: str, thread_id: str) -> dict:
-    """Renderiza a entrega e devolve veredito objetivo.
+def _parsear(saida: str, erro: str) -> dict:
+    try:
+        return json.loads(saida.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        raise RuntimeError(
+            "Verificação visual não devolveu JSON — saída do container:\n"
+            f"{(saida or erro).strip()[:1000]}"
+        )
 
-    visual_ok = nenhum problema de contraste ou de fundo em nenhum dos temas.
-    Entrega sem HTML passa: não há o que renderizar, e reprovar por ausência
-    transformaria o nó num requisito de front-end que a spec pode não ter.
-    """
-    paginas = _paginas(workspace)
-    if not paginas:
-        print(">>> Visual: entrega sem HTML — nada a renderizar.")
-        return {"visual_ok": True, "problemas": [], "feedback_visual": "", "paginas": 0}
 
-    _checar_docker_e_imagem()
+def _renderizar_arquivos(workspace: str, thread_id: str, paginas: list[str]) -> dict:
+    """Modo arquivo: entrega com HTML estático, na jaula sem rede."""
+    _checar_docker_e_imagem((IMAGEM, "Dockerfile.visual"))
     raiz = Path(workspace).resolve()
     print(f">>> Visual: renderizando {len(paginas)} página(s) em jaula sem rede...")
-
-    try:
-        r = subprocess.run(
-            [
-                "docker", "run", "--rm", "--name", f"visual-{thread_id}",
-                "--network", "none",
-                "--memory", MEMORIA, "--cpus", CPUS,
-                # A entrega entra read-only: renderizar não pode alterar o que
-                # está sendo julgado.
-                "-v", f"{raiz.as_posix()}:/entrega:ro",
-                IMAGEM, "/entrega",
-            ],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=TIMEOUT_VISUAL,
-        )
-    except subprocess.TimeoutExpired:
-        raise RuntimeError(
-            f"Verificação visual excedeu {TIMEOUT_VISUAL}s. Aumente TIMEOUT_VISUAL "
-            "ou investigue a página (script travando o load)."
-        )
-
+    r = subprocess.run(
+        [
+            "docker", "run", "--rm", "--name", f"visual-{thread_id}",
+            "--network", "none",
+            "--memory", MEMORIA, "--cpus", CPUS,
+            # A entrega entra read-only: renderizar não pode alterar o que está
+            # sendo julgado.
+            "-v", f"{raiz.as_posix()}:/entrega:ro",
+            IMAGEM, "/entrega",
+        ],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=TIMEOUT_VISUAL,
+    )
     if r.returncode != 0:
         raise RuntimeError(
             f"Verificação visual falhou (exit {r.returncode}):\n"
             f"{(r.stderr or r.stdout).strip()[:1000]}"
         )
+    return _parsear(r.stdout, r.stderr)
 
+
+def _renderizar_servida(workspace: str, thread_id: str, perfil) -> dict:
+    """Modo SPA: sobe a entrega e renderiza o que o servidor devolve.
+
+    É o único caminho possível em Next.js e afins, que não deixam HTML estático
+    no workspace — ali o nó virava no-op silencioso justamente na stack onde
+    seria mais útil.
+
+    A jaula muda de forma, não de princípio: em vez de `--network none`, uma
+    bridge Docker `--internal` sem rota para a internet, com o alvo e o
+    navegador dentro dela. É a mesma contenção do pentest, e pela mesma razão —
+    o alvo *precisa* estar alcançável, então o que se corta é a saída.
+    """
+    _checar_docker_e_imagem(
+        (IMAGEM, "Dockerfile.visual"),
+        (perfil.imagem_alvo, perfil.dockerfile_alvo),
+    )
+    run = infra.ler_run(workspace, "A verificação visual de SPA", _DESLIGAR)
+    rede = f"squad-visual-{thread_id}"
+    nome_alvo = f"alvo-visual-{thread_id}"
+    base = f"http://{nome_alvo}:{run['port']}/"
+
+    print(f">>> Visual: subindo a entrega em rede interna isolada ({rede})...")
     try:
-        medida = json.loads(r.stdout.strip().splitlines()[-1])
-    except (ValueError, IndexError):
-        raise RuntimeError(
-            "Verificação visual não devolveu JSON — saída do container:\n"
-            f"{(r.stdout or r.stderr).strip()[:1000]}"
+        infra.subir(workspace, rede, nome_alvo, perfil, run)
+        print(f">>> Visual: renderizando {base} e um nível de links...")
+        r = subprocess.run(
+            [
+                "docker", "run", "--rm", "--name", f"visual-{thread_id}",
+                "--network", rede,
+                "--memory", MEMORIA, "--cpus", CPUS,
+                IMAGEM, base,
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=TIMEOUT_VISUAL,
         )
+        if r.returncode != 0:
+            # O log do alvo é o que explica uma entrega que não sobe — e sem ele
+            # o erro seria "a página não abriu", que não diz o porquê.
+            raise RuntimeError(
+                f"Verificação visual falhou (exit {r.returncode}):\n"
+                f"{(r.stderr or r.stdout).strip()[:800]}\n"
+                f"--- log do alvo ---\n{infra.logs(nome_alvo)}"
+            )
+        return _parsear(r.stdout, r.stderr)
+    finally:
+        infra.derrubar(rede, nome_alvo)
+
+
+def executar_visual(workspace: str, thread_id: str, perfil) -> dict:
+    """Renderiza a entrega e devolve veredito objetivo.
+
+    visual_ok = nenhum problema de contraste ou de fundo em nenhum dos temas.
+
+    Dois caminhos, e a escolha é do que a entrega é, não de configuração:
+    HTML estático no workspace é aberto por `file://`; entrega que só existe
+    servida sobe como alvo. Entrega sem HTML **e** sem manifesto de subida passa
+    — não há o que renderizar, e reprovar por ausência transformaria o nó num
+    requisito de front-end que a spec pode não ter.
+    """
+    paginas = _paginas(workspace)
+    if paginas:
+        medida = _renderizar_arquivos(workspace, thread_id, paginas)
+    elif (Path(workspace) / infra.ARQUIVO_RUN).is_file():
+        medida = _renderizar_servida(workspace, thread_id, perfil)
+    else:
+        print(">>> Visual: entrega sem HTML e sem run.json — nada a renderizar.")
+        return {"visual_ok": True, "problemas": [], "feedback_visual": "", "paginas": 0}
 
     problemas = medida.get("problemas", [])
     aprovado = not problemas

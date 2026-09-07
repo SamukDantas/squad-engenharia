@@ -161,6 +161,7 @@ PERFIL = PerfilStack(
     extensoes_descartaveis=frozenset({".class", ".jar"}),
     gitignore_entrega=_GITIGNORE,
     imagem_alvo="squad-target-java:latest",
+    preparo_alvo="mvn -o -B -q compile && ",
     dockerfile_alvo="Dockerfile.target-java",
     libs_permitidas=_LIBS,
     instrucoes_qa=(
