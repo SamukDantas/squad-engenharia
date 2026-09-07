@@ -30,23 +30,43 @@ def test_indecifravel_conta_como_reprova():
         assert veredito_sim(resposta) is False, resposta
 
 
-def test_sim_no_inicio_vence_um_nao_posterior():
-    """Comportamento atual, fixado aqui de propósito — e discutível.
-
-    `startswith("SIM")` faz curto-circuito antes da exclusão de NAO, então uma
-    resposta qualificada ("SIM para os requisitos, NAO para os critérios") passa
-    como aprovação. A exclusão de NAO só vale quando o SIM aparece no meio dos
-    20 primeiros chars, não no início.
-
-    Isso erra para o lado de **aprovar** o ambíguo, que é o oposto do que o
-    docstring do módulo promete. Não foi alterado junto com a extração do
-    domínio: mudar veredito é mudar roteamento, e a extração é para não mudar
-    comportamento nenhum. Este teste existe para a decisão ser consciente
-    quando alguém a tomar.
-    """
-    assert veredito_sim("SIM para os requisitos, NAO para os critérios") is True
-    # Já com o SIM no meio, a exclusão funciona:
+def test_resposta_qualificada_conta_como_reprova():
+    """O defeito que este parser tinha, corrigido: `startswith("SIM")` fazia
+    curto-circuito antes da exclusão de NAO, e a exclusão só olhava 20 chars —
+    então o NAO no char 24 nem era visto. Passava como aprovação por dois
+    motivos independentes."""
+    assert veredito_sim("SIM para os requisitos, NAO para os critérios") is False
     assert veredito_sim("Bem, NAO — SIM seria exagero") is False
+
+
+def test_justificativa_depois_do_ponto_nao_reprova():
+    """O veredito é lido na primeira frase. O que vem depois do ponto é
+    justificativa, e justificativa quase sempre contém "não" — ler a resposta
+    inteira reprovaria toda aprovação explicada."""
+    assert veredito_sim("SIM. A suíte cobre os critérios; não há triviais.") is True
+
+
+def test_veredito_no_fim_de_uma_frase_longa_conta():
+    """A janela fixa de 20 chars descartava isto. A frase é o recorte certo."""
+    assert veredito_sim("Com base na análise dos critérios, a resposta é SIM.") is True
+
+
+def test_sim_dentro_de_outra_palavra_nao_conta():
+    """Sem fronteira de palavra, `ASSIM` e `SIMPLESMENTE` aprovavam sozinhos —
+    e o `startswith` fazia de `SIMPLESMENTE não dá` uma aprovação."""
+    assert veredito_sim("Assim que possível") is False
+    assert veredito_sim("SIMPLESMENTE não dá") is False
+
+
+def test_custo_aceito_da_correcao():
+    """Fixado de propósito: "SIM, não há problemas" vira reprova, porque
+    separá-lo de uma resposta qualificada exige entender a frase, não lê-la.
+
+    A conta é assimétrica — reprovar à toa custa uma chamada barata de guard;
+    aprovar uma suíte que não cobre os critérios custa a execução inteira
+    seguindo sobre uma premissa falsa.
+    """
+    assert veredito_sim("SIM, não há problemas") is False
 
 
 def test_aceita_objeto_que_nao_e_string():

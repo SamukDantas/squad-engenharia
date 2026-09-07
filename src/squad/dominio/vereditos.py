@@ -7,18 +7,51 @@ sempre como reprova — errar para o lado de repetir uma rodada é mais barato q
 errar para o lado de aprovar o que ninguém aprovou.
 """
 
+import re
+
 # Linhas finais examinadas em busca do veredito da revisão.
 LINHAS_VEREDITO = 8
 
+# O veredito é lido na **primeira frase**, não numa janela de N caracteres.
+# A janela fixa era o furo: em "SIM para os requisitos, NAO para os critérios"
+# o NAO cai no char 24 e a exclusão nem chegava a vê-lo. A frase é o recorte
+# certo porque é a unidade em que a resposta se qualifica — o que vem depois do
+# ponto é justificativa, e justificativa quase sempre contém "não".
+_FIM_DE_FRASE = re.compile(r"[.;!?\n]")
+LIMITE_FRASE = 200  # teto contra resposta sem pontuação nenhuma
+
+# Fronteira de palavra, não substring: sem ela `ASSIM` e `SIMPLESMENTE` contam
+# como SIM, e a versão anterior aprovava com `startswith` em qualquer uma delas.
+_SIM = re.compile(r"\bSIM\b")
+_NAO = re.compile(r"\bN[AÃ]O\b")
+
 
 def veredito_sim(resposta: object) -> bool:
-    """Parser tolerante de SIM/NAO."""
-    normalizado = str(resposta).strip().upper()
-    return normalizado.startswith("SIM") or (
-        "SIM" in normalizado[:20]
-        and "NAO" not in normalizado[:20]
-        and "NÃO" not in normalizado[:20]
-    )
+    """Parser tolerante de SIM/NAO.
+
+    Duas correções sobre a versão anterior, e as duas iam no mesmo sentido
+    errado — aprovar o que não foi aprovado:
+
+    - `startswith("SIM")` fazia curto-circuito **antes** da exclusão de NAO, e a
+      exclusão só olhava 20 caracteres. "SIM para os requisitos, NAO para os
+      critérios" passava como aprovação por dois motivos independentes;
+    - a busca era por substring, então `ASSIM` e `SIMPLESMENTE` contavam como
+      SIM.
+
+    Agora o veredito é lido na primeira frase, com fronteira de palavra, e um
+    NAO ali dentro reprova mesmo que o SIM venha primeiro.
+
+    O custo aceito: "SIM, não há problemas" também vira reprova, porque separar
+    esse caso de uma resposta qualificada exige entender a frase, não lê-la. A
+    conta é assimétrica e conhecida — reprovar à toa custa uma chamada barata de
+    guard, e aprovar uma suíte que não cobre os critérios custa a execução
+    inteira seguindo sobre uma premissa falsa.
+    """
+    texto = str(resposta).strip().upper()
+    frase = _FIM_DE_FRASE.split(texto, 1)[0][:LIMITE_FRASE]
+    if _NAO.search(frase):
+        return False
+    return bool(_SIM.search(frase))
 
 
 def veredito_aprovado(texto: str) -> bool:
