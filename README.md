@@ -308,6 +308,16 @@ Para publicar as entregas aprovadas, configure `DEPLOY_OWNER=<conta>` no
 `<DEPLOY_OWNER>/<slug do pedido>` no GitHub se ele ainda não existir, e publica
 a entrega ali. Sem a variável, o deploy commita apenas localmente.
 
+**A squad só publica o que compila.** Antes do push, o nó de deploy compila a
+entrega no ambiente da própria stack — `next build`, `mvn compile`,
+`compileall` — e falha ali interrompe a publicação com o erro do compilador.
+Não é redundante com o passo de build da suíte: os tetos de circuit breaker
+roteiam ao gate humano **com a suíte vermelha**, de propósito, e um `sim` ali
+publicaria o que não compila. Foi exatamente assim que uma entrega Next.js
+quebrada chegou ao GitHub depois de 38 testes verdes e revisão aprovada. A
+verificação roda contra o disco, não contra estado guardado: thread retomada
+dias depois prova de novo.
+
 O nome do repositório sai do pedido, não do `thread_id` — um UUID não diz nada
 a quem abre a lista de repositórios. A criação é idempotente: retomar a thread
 reexecuta o nó de deploy inteiro, e um repositório já criado é reaproveitado.

@@ -70,6 +70,17 @@ class PerfilStack:
     # das três camadas podia ver.
     comando_build: object = None     # Callable[[], str] | None
 
+    # O que significa "compila" nesta stack. Roda no nó de deploy, logo antes
+    # do push, e falha nele impede a publicação.
+    #
+    # Diferente de `comando_build`, este é obrigatório em toda stack: mesmo
+    # onde não há build (Python), há como provar que o código é carregável.
+    # E é separado dos testes de propósito — os tetos de circuit breaker
+    # roteiam ao gate humano com a suíte vermelha, e um `sim` ali publicaria
+    # o que não compila. Foi assim que uma entrega Next.js quebrada foi ao
+    # GitHub depois de 38 testes verdes e revisão aprovada.
+    comando_verificacao: object = None  # Callable[[], str]
+
     # ---- limites da jaula ----
     # 512m/120s não cobrem cold start de vitest com transpilação nem JVM+Maven,
     # então são do perfil, não constantes globais.

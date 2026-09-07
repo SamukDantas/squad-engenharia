@@ -36,7 +36,11 @@ from ..adaptadores.metricas_json import medir, registrar
 from ..adaptadores.opencode_cli import executar_opencode
 from ..pentest import executar_pentest, habilitado as pentest_habilitado
 from ..resiliencia import com_retry
-from ..adaptadores.testes import LIMITE_SAIDA, executar_testes
+from ..adaptadores.testes import (
+    LIMITE_SAIDA,
+    executar_testes,
+    verificar_compilacao,
+)
 from ..visual import executar_visual, habilitado as visual_habilitado
 from .state import EstadoProjeto
 
@@ -429,11 +433,37 @@ def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
 
 def no_deploy(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """Deploy real (Fase 4): git commit + push da entrega, sem LLM. Só roda
-    após aprovação humana explícita no gate."""
+    após aprovação humana explícita no gate — e só publica o que compila.
+
+    A verificação de compilação roda aqui, e não é redundante com o passo de
+    build do `executar_testes`: os tetos de circuit breaker roteiam ao gate
+    humano **com a suíte vermelha**, de propósito, para o humano decidir. Um
+    `sim` ali publicaria o que não compila, e foi assim que uma entrega Next.js
+    quebrada chegou ao GitHub depois de 38 testes verdes e revisão aprovada.
+
+    Roda contra o disco, não contra estado guardado: uma thread retomada dias
+    depois precisa provar de novo que compila.
+    """
     thread_id = _tid(config)
+    perfil = _perfil(state)
+
+    with medir(thread_id, "verificacao_deploy", stack=perfil.nome) as m:
+        falha = verificar_compilacao(state["workspace"], thread_id, perfil)
+        m.update(compila=not falha)
+    if falha:
+        raise RuntimeError(
+            "A entrega NÃO COMPILA — nada foi publicado. A squad só empurra a "
+            "branch quando o código compila no ambiente da própria stack, e "
+            "aprovar o gate não dispensa essa prova: teste vermelho pode chegar "
+            "ao gate por teto de circuit breaker.\n"
+            f"Saída do compilador:\n{falha}\n"
+            "O checkpoint preserva o progresso: corrija a entrega e retome com "
+            "`main.py --thread <id>`, que reexecuta apenas o deploy."
+        )
+
     with medir(thread_id, "deploy") as m:
         resultado = executar_deploy(
-            state["workspace"], thread_id, state["pedido"], _perfil(state)
+            state["workspace"], thread_id, state["pedido"], perfil
         )
         m.update(deploy_ref=resultado.get("deploy_ref", ""))
     return resultado

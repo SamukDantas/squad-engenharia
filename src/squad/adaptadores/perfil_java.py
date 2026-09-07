@@ -62,6 +62,12 @@ def _comando_container(dir_saida: str) -> str:
     )
 
 
+def _comando_verificacao() -> str:
+    """`mvn compile`: só a compilação, sem rodar a suíte — a verificação do
+    deploy responde "compila?", não "passa?"."""
+    return "cp -r /src /app/projeto && cd /app/projeto && mvn -o -B -q compile"
+
+
 def _comando_host(dir_saida: str) -> list[str]:
     # Inalcançável: `permite_host=False`.
     return ["mvn", "-o", "-B", "test"]
@@ -141,6 +147,7 @@ PERFIL = PerfilStack(
     dockerfile_sandbox="Dockerfile.sandbox-java",
     runner="maven",
     comando_container=_comando_container,
+    comando_verificacao=_comando_verificacao,
     comando_host=_comando_host,
     relatorio_cobertura=RELATORIO,
     ler_cobertura=_ler_cobertura,

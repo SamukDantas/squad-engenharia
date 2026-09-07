@@ -67,6 +67,21 @@ def _comando_container(dir_saida: str) -> str:
     )
 
 
+def _comando_verificacao() -> str:
+    """O mais perto de "compila" que Python tem: byte-compilação de tudo.
+
+    Só `compileall`, sem importar os módulos. Importar executaria o código de
+    topo de cada arquivo — e uma entrega que sobe servidor ou lê stdin travaria
+    até o timeout, transformando a verificação num risco maior que o defeito que
+    ela procura.
+
+    O limite é conhecido e aceito: isto pega erro de sintaxe, não erro de
+    import. Import quebrado já é pego antes, na coleta do pytest, que roda a
+    suíte inteira contra os módulos reais.
+    """
+    return "cp -r /src /app/projeto && cd /app/projeto && python -m compileall -q ."
+
+
 def _comando_host(dir_saida: str) -> list[str]:
     return [
         sys.executable, "-m", "pytest", *_PYTEST_ARGS,
@@ -111,6 +126,7 @@ PERFIL = PerfilStack(
     dockerfile_sandbox="Dockerfile.sandbox-python",
     runner="pytest",
     comando_container=_comando_container,
+    comando_verificacao=_comando_verificacao,
     comando_host=_comando_host,
     relatorio_cobertura=RELATORIO,
     ler_cobertura=_ler_cobertura,

@@ -210,3 +210,31 @@ def executar_testes(
         f" | cobertura {cobertura.total}%{detalhe_pior}"
     )
     return ResultadoTestes(testes_ok=testes_ok, saida=saida, cobertura=cobertura)
+
+
+def verificar_compilacao(
+    workspace: str, thread_id: str, perfil: PerfilStack
+) -> str | None:
+    """A entrega compila? Devolve a saída do compilador quando não.
+
+    Chamada pelo nó de deploy, imediatamente antes do push. Roda na mesma jaula
+    dos testes — read-only, sem rede — porque compilar código gerado por LLM é
+    executar ferramenta sobre conteúdo não confiável, como o resto.
+
+    Exige Docker mesmo com `TEST_RUNNER=host`: quem escolheu rodar a suíte sem
+    jaula fez uma escolha sobre o próprio ciclo de trabalho, não sobre o que
+    pode ser publicado. O push é o passo irreversível, e é o único lugar do
+    pipeline onde não há um segundo juiz depois.
+    """
+    if not perfil.comando_verificacao:
+        return None
+    _checar_docker(perfil)
+    codigo, saida = _rodar_docker(
+        workspace, perfil, perfil.comando_verificacao(),
+        f"Verificando se a entrega compila ({perfil.nome})", f"verif-{thread_id}",
+    )
+    if codigo == 0:
+        print(f">>> A entrega compila ({perfil.nome}) — liberado para publicar.")
+        return None
+    print(f">>> A entrega NÃO compila (exit {codigo}) — publicação bloqueada.")
+    return saida[-LIMITE_SAIDA:]

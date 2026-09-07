@@ -164,3 +164,32 @@ def test_saida_dos_testes_e_cortada_pela_cauda():
     campos = resultado.como_estado(limite_saida=5)
     assert campos["saida_testes"] == "CAUDA"
     assert campos["testes_ok"] is False
+
+
+# ---------- a regra: só publica o que compila ----------
+
+def test_toda_stack_sabe_dizer_se_compila():
+    """Obrigatório, não opcional: o push é o passo irreversível, e uma stack sem
+    verificação abriria a porta que a regra existe para fechar."""
+    for perfil in (perfis.obter(n) for n in perfis.nomes()):
+        assert callable(perfil.comando_verificacao), perfil.nome
+        assert perfil.comando_verificacao(), perfil.nome
+
+
+def test_verificacao_e_independente_da_suite():
+    """A verificação responde "compila?", não "passa?". Os tetos de circuit
+    breaker roteiam ao gate humano com a suíte vermelha de propósito, e um `sim`
+    ali publicaria o que não compila — foi assim que uma entrega Next.js quebrada
+    chegou ao GitHub depois de 38 testes verdes e revisão aprovada."""
+    cmd_java = perfis.obter("java").comando_verificacao()
+    assert "compile" in cmd_java and " test" not in cmd_java
+
+    cmd_py = perfis.obter("python").comando_verificacao()
+    assert "compileall" in cmd_py and "pytest" not in cmd_py
+
+
+def test_nextjs_verifica_com_o_mesmo_build():
+    """Em Next.js "compila" é `next build` — a verificação e o passo de build são
+    a mesma coisa, e duplicar o comando abriria espaço para eles divergirem."""
+    perfil = perfis.obter("nextjs")
+    assert perfil.comando_verificacao() == perfil.comando_build()

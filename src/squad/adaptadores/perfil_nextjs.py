@@ -185,6 +185,8 @@ PERFIL = PerfilStack(
     runner="vitest",
     comando_container=_comando_container,
     comando_build=_comando_build,
+    # Mesma compilação do passo de build: em Next.js "compila" é `next build`.
+    comando_verificacao=_comando_build,
     comando_host=_comando_host,
     relatorio_cobertura=RELATORIO,
     ler_cobertura=_ler_cobertura,
