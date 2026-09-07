@@ -24,6 +24,7 @@ RELATORIO = "coverage-summary.json"
 # Diretório onde a imagem instala as dependências, um nível acima do projeto.
 NODE_MODULES = "/app/node_modules"
 VITEST = f"{NODE_MODULES}/.bin/vitest"
+NEXT = f"{NODE_MODULES}/.bin/next"
 
 _SUFIXOS_TESTE = (".test.ts", ".test.tsx", ".test.js", ".test.jsx",
                   ".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx")
@@ -100,6 +101,15 @@ def _flags_cobertura(dir_saida: str) -> str:
     )
 
 
+def _comando_build() -> str:
+    """`next build` — compilação e checagem de tipos.
+
+    Roda em container próprio, antes da suíte. `.next/` fica na cópia dentro do
+    container e some com ele: a entrega no host não é tocada.
+    """
+    return f"cp -r /src /app/projeto && cd /app/projeto && {NEXT} build"
+
+
 def _comando_container(dir_saida: str) -> str:
     return (
         f"cp -r /src /app/projeto && cd /app/projeto && "
@@ -158,6 +168,7 @@ PERFIL = PerfilStack(
     dockerfile_sandbox="Dockerfile.sandbox-nextjs",
     runner="vitest",
     comando_container=_comando_container,
+    comando_build=_comando_build,
     comando_host=_comando_host,
     relatorio_cobertura=RELATORIO,
     ler_cobertura=_ler_cobertura,

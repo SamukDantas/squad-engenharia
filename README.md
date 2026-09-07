@@ -203,11 +203,20 @@ python main.py --stack java   "API de reserva de salas com autenticação"
 
 Cada stack tem sandbox próprio, construído uma vez:
 
-| stack | runner | cobertura | imagem |
-|---|---|---|---|
-| `python` | pytest | coverage.py | `Dockerfile.sandbox-python` |
-| `nextjs` | vitest | V8 / istanbul | `Dockerfile.sandbox-nextjs` |
-| `java` | maven | JaCoCo | `Dockerfile.sandbox-java` |
+| stack | runner | cobertura | build | imagem |
+|---|---|---|---|---|
+| `python` | pytest | coverage.py | — | `Dockerfile.sandbox-python` |
+| `nextjs` | vitest | V8 / istanbul | `next build` | `Dockerfile.sandbox-nextjs` |
+| `java` | maven | JaCoCo | no `mvn test` | `Dockerfile.sandbox-java` |
+
+Stack que compila roda o **build antes da suíte**, em container próprio, e falha
+nele reprova a rodada sem chegar aos testes — com o erro do compilador e a linha
+exata no brief de correção. Isso existe por uma entrega real que passou por 38
+testes verdes, 87,4% de cobertura, revisão aprovada e deploy, e **não
+compilava**: um `.module.css` com seletor de elemento (`table {}`) é CSS válido
+e CSS Module inválido. Os testes transformam TS/JSX sem construir, o revisor não
+tem como suspeitar de CSS válido, e o nó visual pula em SPA — nenhuma das três
+camadas podia ver.
 
 Tudo roda com `--network none`, então o ambiente vem assado na imagem: o
 `node_modules` fica um nível acima do projeto (o resolvedor do Node sobe a

@@ -59,6 +59,17 @@ class PerfilStack:
     # runtime do orquestrador. As demais stacks recusam em vez de tentar.
     permite_host: bool = True
 
+    # Compilação, quando a stack tem uma. Roda ANTES da suíte, em container
+    # próprio, e falha nele reprova a rodada sem chegar aos testes.
+    #
+    # Existe por uma entrega real: um `.module.css` com seletor de elemento
+    # (`table {}`) é CSS válido e CSS Module inválido. A entrega passou por
+    # 38 testes verdes, 87,4% de cobertura, revisão aprovada e deploy — e não
+    # compilava. Os testes transformam TS/JSX sem construir, o revisor não
+    # tem como suspeitar de CSS válido, e o nó visual pula em SPA. Nenhuma
+    # das três camadas podia ver.
+    comando_build: object = None     # Callable[[], str] | None
+
     # ---- limites da jaula ----
     # 512m/120s não cobrem cold start de vitest com transpilação nem JVM+Maven,
     # então são do perfil, não constantes globais.

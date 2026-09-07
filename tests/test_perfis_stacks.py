@@ -212,3 +212,36 @@ def test_config_fica_fora_da_entrega(tmp_path):
     runner sem acrescentar arquivo à entrega que vai ao deploy."""
     assert perfil_nextjs.ARQUIVO_CONFIG.startswith(".squad/")
     assert ".squad" in perfis.obter("nextjs").ignorar_no_workspace
+
+
+# ---------- passo de build: existe onde há compilação ----------
+
+def test_so_o_nextjs_tem_passo_de_build():
+    """Python não compila; no Java o `mvn test` já compila antes de testar, e um
+    passo separado só dobraria o custo do container."""
+    com_build = [n for n in perfis.nomes() if perfis.obter(n).comando_build]
+    assert com_build == ["nextjs"]
+
+
+def test_build_do_nextjs_invoca_o_next_por_caminho_absoluto():
+    """Mesmo motivo do vitest: `npx` consultaria o registry num container sem
+    rede e viraria espera até o timeout."""
+    cmd = perfis.obter("nextjs").comando_build()
+    assert "/app/node_modules/.bin/next build" in cmd
+    assert "npx" not in cmd
+
+
+def test_falha_de_build_e_um_desfecho_distinto():
+    """Entrega que não compila não é entrega com teste vermelho: nenhum teste
+    rodou, e mandar o dev "corrigir com base na saída dos testes" o aponta para
+    um lugar onde não há nada. Medido numa entrega real que passou por 38 testes
+    verdes, revisão aprovada e deploy — e não compilava."""
+    from src.squad.portas.testes import ResultadoTestes
+
+    normal = ResultadoTestes(testes_ok=False, saida="x", cobertura=Cobertura())
+    assert normal.falha_de_build is False
+    build = ResultadoTestes(
+        testes_ok=False, saida="Failed to compile", cobertura=Cobertura(),
+        falha_de_build=True,
+    )
+    assert build.falha_de_build is True and build.testes_ok is False

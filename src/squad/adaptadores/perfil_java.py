@@ -46,6 +46,11 @@ def _preparar(workspace: str) -> None:
     entrega, e escrevê-lo é trabalho do executor."""
 
 
+# Sem `comando_build`: `mvn test` já compila antes de testar, e um passo
+# separado só pagaria outro start de container e de JVM. A contrapartida é que
+# um erro de compilação chega ao dev rotulado como falha de teste — mas a saída
+# do Maven diz "COMPILATION ERROR" na primeira linha, então a instrução não se
+# perde.
 def _comando_container(dir_saida: str) -> str:
     # `-o` offline: dependência faltando falha na hora, em vez de esperar o
     # timeout de rede num container que nem tem rota para fora.

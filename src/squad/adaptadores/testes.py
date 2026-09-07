@@ -92,11 +92,16 @@ def _checar_docker(perfil: PerfilStack) -> None:
 
 
 def _rodar_docker(
-    workspace: str, thread_id: str, perfil: PerfilStack
+    workspace: str, perfil: PerfilStack,
+    comando_sh: str, rotulo: str, nome_container: str,
 ) -> tuple[int, str]:
-    _checar_docker(perfil)
+    """Uma passada na jaula, com o comando que vier.
+
+    Genérico porque agora há dois: o build, quando a stack tem um, e a suíte.
+    A jaula é a mesma nos dois — read-only, sem rede, com limites.
+    """
     raiz = Path(workspace).resolve()
-    nome = f"qa-{thread_id}"
+    nome = nome_container
     comando = [
         "docker", "run", "--rm", "--name", nome,
         # Entrega read-only: um rm -rf dentro do container não toca o host.
@@ -106,12 +111,9 @@ def _rodar_docker(
         "--network", "none",
         "--memory", perfil.memoria, "--cpus", perfil.cpus,
         perfil.imagem_sandbox,
-        "sh", "-c", perfil.comando_container(DIR_SAIDA_CONTAINER),
+        "sh", "-c", comando_sh,
     ]
-    print(
-        f">>> Executando {perfil.runner} em sandbox Docker "
-        f"({perfil.imagem_sandbox}, sem rede)..."
-    )
+    print(f">>> {rotulo} em sandbox Docker ({perfil.imagem_sandbox}, sem rede)...")
     try:
         r = subprocess.run(
             comando, capture_output=True, text=True, encoding="utf-8",
@@ -129,8 +131,8 @@ def _rodar_docker(
         if isinstance(parcial, bytes):
             parcial = parcial.decode("utf-8", errors="replace")
         return 1, (
-            f"TIMEOUT: os testes excederam {perfil.timeout_testes}s — provável "
-            f"loop infinito ou teste travado. Container encerrado.\n"
+            f"TIMEOUT: {rotulo} excedeu {perfil.timeout_testes}s — provável "
+            f"loop infinito ou processo travado. Container encerrado.\n"
             f"Saída parcial:\n{parcial[-2_000:]}"
         )
 
@@ -169,12 +171,31 @@ def executar_testes(
     """
     _preparar(workspace, perfil)
     runner = (os.getenv("TEST_RUNNER") or "docker").strip().lower()
-    if runner == "docker":
-        codigo, saida = _rodar_docker(workspace, thread_id, perfil)
-    elif runner == "host":
-        codigo, saida = _rodar_host(workspace, perfil)
-    else:
+    if runner not in {"docker", "host"}:
         raise ValueError(f"TEST_RUNNER inválido: '{runner}'. Use 'docker' ou 'host'.")
+
+    if runner == "docker":
+        _checar_docker(perfil)
+        # Build antes da suíte, quando a stack tem um. Entrega que não compila
+        # reprova aqui, com o erro do compilador — e não depois, com testes
+        # verdes sobre código que nunca virou binário.
+        if perfil.comando_build:
+            codigo, saida = _rodar_docker(
+                workspace, perfil, perfil.comando_build(),
+                f"Compilando a entrega ({perfil.nome})", f"build-{thread_id}",
+            )
+            if codigo != 0:
+                print(f">>> build falhou (exit {codigo}) — a entrega não compila.")
+                return ResultadoTestes(
+                    testes_ok=False, saida=saida, cobertura=Cobertura(),
+                    falha_de_build=True,
+                )
+        codigo, saida = _rodar_docker(
+            workspace, perfil, perfil.comando_container(DIR_SAIDA_CONTAINER),
+            f"Executando {perfil.runner}", f"qa-{thread_id}",
+        )
+    else:
+        codigo, saida = _rodar_host(workspace, perfil)
 
     testes_ok = codigo == 0
     cobertura = _cobertura(workspace, perfil)

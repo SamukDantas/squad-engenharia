@@ -15,6 +15,10 @@ class ResultadoTestes:
     testes_ok: bool
     saida: str
     cobertura: Cobertura
+    # Reprovou antes de chegar aos testes: a entrega não compila. Merece
+    # feedback próprio — mandar "corrija com base na saída dos testes" quando
+    # nenhum teste rodou aponta o dev para o lugar errado.
+    falha_de_build: bool = False
 
     def como_estado(self, limite_saida: int) -> dict:
         return {

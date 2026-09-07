@@ -282,7 +282,15 @@ def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     modulo_ok = pior >= _cobertura_minima_modulo()
     cobertura_ok = agregado_ok and modulo_ok
 
-    if not resultado.testes_ok:
+    if resultado.falha_de_build:
+        # Nenhum teste rodou: mandar "corrija com base na saída dos testes"
+        # apontaria o dev para um lugar onde não há nada para ver.
+        feedback = (
+            "A entrega NÃO COMPILA — a suíte nem chegou a rodar. Corrija os "
+            "erros de compilação abaixo antes de qualquer outra coisa:"
+            f"\n{saida}"
+        )
+    elif not resultado.testes_ok:
         feedback = (
             "Os testes automatizados FALHARAM. Corrija o código (ou os "
             f"imports/estrutura) com base na saída real do {perfil.runner}:"
