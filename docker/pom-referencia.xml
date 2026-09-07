@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  POM de referência da stack Java.
+
+  Serve a dois propósitos, e é por isso que ele existe como arquivo em vez de
+  viver só no prompt:
+
+  1. É usado no build da imagem para popular o `~/.m2`. O Maven baixa não só as
+     dependências como os próprios plugins do build, e o sandbox roda com a rede
+     desligada (network none) — o que não estiver aqui não estará lá.
+     Nota: dois hífens seguidos são ilegais dentro de comentário XML, então a
+     flag do Docker não pode ser escrita por extenso aqui.
+  2. É o pom que o executor recebe no prompt e deve escrever. As versões são as
+     mesmas por construção: se ele desviar, o `mvn -o` falha na hora, o que é a
+     régua de sempre (exit code manda) em vez de uma espera até o timeout.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.squad</groupId>
+  <artifactId>entrega</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.11.3</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+      </plugin>
+      <!--
+        JaCoCo preso ao ciclo: `prepare-agent` antes dos testes e `report` na
+        fase `test`. Sem isso, `mvn test` rodaria a suíte e não deixaria
+        relatório nenhum, e o piso de cobertura reprovaria toda entrega.
+      -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>0.8.12</version>
+        <executions>
+          <execution>
+            <id>preparar</id>
+            <goals><goal>prepare-agent</goal></goals>
+          </execution>
+          <execution>
+            <id>relatorio</id>
+            <phase>test</phase>
+            <goals><goal>report</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

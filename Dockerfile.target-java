@@ -1,0 +1,30 @@
+# Alvo do pentest para a stack Java: sobe a entrega como servidor.
+#
+# Espelha a imagem do sandbox — mesmo `~/.m2` populado, mesmas versões — porque
+# entrega que passa nos testes e quebra no alvo por diferença de ambiente seria
+# um veredito sobre a imagem, não sobre o código. O comando de subida vem do
+# `.squad/run.json` que o executor escreve.
+#
+# Diferente do sandbox, este container **tem** rede: o alvo precisa estar
+# alcançável pelo atacante. A contenção é a bridge Docker `--internal`, sem rota
+# para a internet (ver src/squad/pentest.py).
+#
+# Build (uma vez, e só se PENTEST_HABILITADO=1):
+#   docker build -f Dockerfile.target-java -t squad-target-java:latest .
+FROM maven:3.9.9-eclipse-temurin-21
+
+# Sem `--uid 1000`: a imagem do Maven já tem um usuário nesse uid.
+RUN useradd --create-home alvo \
+    && mkdir -p /app && chown alvo:alvo /app
+USER alvo
+
+COPY --chown=alvo:alvo docker/pom-referencia.xml /home/alvo/semente/pom.xml
+WORKDIR /home/alvo/semente
+
+RUN mkdir -p src/main/java/com/squad \
+    && printf 'package com.squad;\npublic class Semente { }\n' \
+        > src/main/java/com/squad/Semente.java \
+    && mvn -B -q compile \
+    && rm -rf target
+
+WORKDIR /app

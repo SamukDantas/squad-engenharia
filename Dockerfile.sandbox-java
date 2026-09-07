@@ -1,0 +1,48 @@
+# Jaula de execução dos testes da stack Java.
+#
+# É a stack mais hostil ao --network none: o Maven baixa não só as dependências
+# como os próprios plugins do build. Um `mvn test` sem rede num repositório
+# vazio falha antes de compilar.
+#
+# A solução é popular o `~/.m2` no build da imagem, rodando um projeto semente
+# de verdade — `dependency:go-offline` sozinho não basta, porque não resolve os
+# plugins que só são acionados durante o ciclo (surefire, jacoco). Em runtime o
+# `mvn -o` transforma qualquer coisa faltando num erro imediato, em vez de uma
+# espera até o timeout de rede.
+#
+# Build (uma vez, e demora — baixa o repositório inteiro):
+#   docker build -f Dockerfile.sandbox-java -t squad-sandbox-java:latest .
+FROM maven:3.9.9-eclipse-temurin-21
+
+# Sem `--uid 1000`: a imagem do Maven já tem um usuário nesse uid, e fixá-lo
+# faz o `useradd` sair com 4 e derrubar o build.
+RUN useradd --create-home sandbox \
+    && mkdir -p /app && chown sandbox:sandbox /app
+USER sandbox
+
+# O pom da semente é o mesmo que o executor recebe no prompt: as versões batem
+# por construção, então o que foi baixado aqui é exatamente o que a entrega vai
+# pedir lá.
+COPY --chown=sandbox:sandbox docker/pom-referencia.xml /home/sandbox/semente/pom.xml
+WORKDIR /home/sandbox/semente
+
+# Uma classe e um teste mínimos: rodar o ciclo de verdade é o que arrasta o
+# surefire, o jacoco e o compilador para o repositório local.
+RUN mkdir -p src/main/java/com/squad src/test/java/com/squad \
+    && printf 'package com.squad;\npublic class Semente { public int dobro(int n) { return n * 2; } }\n' \
+        > src/main/java/com/squad/Semente.java \
+    && printf 'package com.squad;\nimport org.junit.jupiter.api.Test;\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nclass SementeTest { @Test void dobra() { assertEquals(4, new Semente().dobro(2)); } }\n' \
+        > src/test/java/com/squad/SementeTest.java \
+    && mvn -B -q test \
+    && test -f target/site/jacoco/jacoco.xml \
+    && rm -rf target
+
+# A imagem base define MAVEN_CONFIG=/root/.m2, que o usuário sem privilégio não
+# pode escrever. O Maven cai para `${user.home}/.m2` e funciona, mas avisa a
+# cada execução e tenta criar `/root` — ruído que se confunde com erro real na
+# saída que vai para o dev. Apontar explicitamente para onde o repositório de
+# fato está resolve. Vai no fim do arquivo de propósito: acima, invalidaria a
+# camada da semente e o build baixaria o repositório inteiro de novo.
+ENV MAVEN_CONFIG=/home/sandbox/.m2
+
+WORKDIR /app

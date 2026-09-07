@@ -58,17 +58,23 @@ com erro explícito.
 squad-engenharia/
 ├── main.py                     # ponto de entrada
 ├── requirements.txt            # deps da squad + ambiente pré-provisionado p/ código gerado
+├── pytest.ini                  # a suíte da squad é só tests/, nunca as entregas
+├── tests/                      # testes do domínio (rotas, guards, vereditos, orçamento)
 ├── .env.example
 ├── workspace/<thread_id>/      # entrega real de cada execução (gitignored)
 └── src/squad/
     ├── config/
     │   ├── agents.yaml         # definição dos agentes (papéis, goals, backstories)
     │   └── tasks.yaml          # definição das tarefas de cada crew
+    ├── portas/                 # as formas: perfil de stack, testes, executor, métricas
+    ├── adaptadores/            # implementações: perfil python, runner de testes, opencode, métricas
+    ├── dominio/                # as decisões, sem nenhuma tecnologia
+    │   ├── rotas.py            # para onde ir depois de cada nó, e os tetos
+    │   ├── guards.py           # entrega vazia e rodada que não corrigiu nada
+    │   ├── vereditos.py        # leitura de SIM/NAO e APROVADO/REPROVADO
+    │   └── orcamento.py        # repartição do contexto enviado ao LLM
     ├── tools.py                # ferramentas de arquivo confinadas ao workspace
-    ├── opencode.py             # executor de desenvolvimento via OpenCode CLI
-    ├── sandbox.py              # jaula de execução dos testes (Docker/host)
     ├── visual.py               # renderiza a entrega e mede contraste (Docker)
-    ├── metricas.py             # métricas por execução (metrics/<thread_id>.json)
     ├── painel.py               # painel read-only sobre metrics/ (servidor + agregação)
     ├── painel.html             # as três telas do painel (sem build, sem CDN)
     ├── deploy.py               # deploy real (git commit + push da entrega)
@@ -138,7 +144,7 @@ Os testes gerados rodam em **sandbox Docker** (`TEST_RUNNER=docker`, padrão).
 Construa a imagem uma vez:
 
 ```bash
-docker build -f Dockerfile.sandbox -t squad-sandbox:latest .
+docker build -f Dockerfile.sandbox-python -t squad-sandbox-python:latest .
 ```
 
 Sem Docker, use `TEST_RUNNER=host` — os testes passam a rodar direto na sua
@@ -168,6 +174,68 @@ defeito exato que motivou o nó.
 `fetch` (linhas de tabela, gráficos com dados) não é medido — sem rede, o fetch
 não completa. Cobre o esqueleto da página, que é onde mora o defeito de tema e
 contraste. Não substitui olho humano em layout. Entrega sem HTML passa direto.
+
+## Testes da squad
+
+O domínio — as decisões — mora em `src/squad/dominio/`, sem nenhum import de
+langgraph, crewai, docker ou pathlib. É o que sobrevive à troca de stack, de
+executor e de infraestrutura, e é o que dá para testar sem subir container nem
+gastar token:
+
+```bash
+pytest
+```
+
+Entre o domínio e a tecnologia há **portas**, e elas existem só onde há variação
+real: o perfil da stack, quem executa a suíte, quem escreve o código e onde as
+métricas são gravadas. Publicação, pentest e LLM ficaram de fora de propósito —
+têm uma implementação só, e uma porta para uma implementação é fiação sem ganho.
+
+A stack da entrega é um **perfil**: imagem do sandbox, comando de teste, parser
+de cobertura, convenção de diretório de teste, `.gitignore` da entrega. Escolhida
+por execução e gravada no checkpoint:
+
+```bash
+python main.py --stack python "Criar endpoint de healthcheck"
+python main.py --stack nextjs "Dashboard de indicadores do funil comercial"
+python main.py --stack java   "API de reserva de salas com autenticação"
+```
+
+Cada stack tem sandbox próprio, construído uma vez:
+
+| stack | runner | cobertura | build | imagem |
+|---|---|---|---|---|
+| `python` | pytest | coverage.py | — | `Dockerfile.sandbox-python` |
+| `nextjs` | vitest | V8 / istanbul | `next build` | `Dockerfile.sandbox-nextjs` |
+| `java` | maven | JaCoCo | no `mvn test` | `Dockerfile.sandbox-java` |
+
+Stack que compila roda o **build antes da suíte**, em container próprio, e falha
+nele reprova a rodada sem chegar aos testes — com o erro do compilador e a linha
+exata no brief de correção. Isso existe por uma entrega real que passou por 38
+testes verdes, 87,4% de cobertura, revisão aprovada e deploy, e **não
+compilava**: um `.module.css` com seletor de elemento (`table {}`) é CSS válido
+e CSS Module inválido. Os testes transformam TS/JSX sem construir, o revisor não
+tem como suspeitar de CSS válido, e o nó visual pula em SPA — nenhuma das três
+camadas podia ver.
+
+Tudo roda com `--network none`, então o ambiente vem assado na imagem: o
+`node_modules` fica um nível acima do projeto (o resolvedor do Node sobe a
+árvore e o encontra), e o `~/.m2` do Java é populado no build rodando um projeto
+semente de verdade — `dependency:go-offline` sozinho não traz os plugins que só
+são acionados durante o ciclo. Por isso o `pom.xml` da entrega Java não é livre:
+o executor recebe no prompt exatamente o [pom de
+referência](docker/pom-referencia.xml) que semeou a imagem.
+
+A camada de fora (`graph/workflow.py`) lê disco, chama adaptadores e traduz o
+que o domínio devolve em efeito. As rotas, por exemplo, não registram métrica
+nem imprimem: devolvem uma `Decisao` com destino, teto e aviso, e o grafo aplica
+na ordem de sempre — registrar o teto, imprimir o aviso, levantar o erro.
+
+Os casos da suíte não são inventados: cada um fixa uma lição já paga em execução
+real e documentada no [RESILIENCIA.md](docs/RESILIENCIA.md) — o revisor que
+escrevia `**APROVADO**` e fechava com um parágrafo (item 27), o executor que
+deixou um arquivo de 0 bytes (item 28), a rodada de correção que não mudou um
+byte (item 32), o teto do dump que cortava sempre a suíte (item 33).
 
 ## Painel de métricas
 
@@ -213,7 +281,7 @@ determinístico sobe a entrega como servidor e a ataca de verdade. Requer duas
 imagens, construídas uma vez:
 
 ```bash
-docker build -f Dockerfile.target  -t squad-target:latest  .
+docker build -f Dockerfile.target-python -t squad-target-python:latest .
 docker build -f Dockerfile.pentest -t squad-pentest:latest .
 ```
 
@@ -239,6 +307,16 @@ Para publicar as entregas aprovadas, configure `DEPLOY_OWNER=<conta>` no
 `.env`. **Um projeto, um repositório:** o deploy cria
 `<DEPLOY_OWNER>/<slug do pedido>` no GitHub se ele ainda não existir, e publica
 a entrega ali. Sem a variável, o deploy commita apenas localmente.
+
+**A squad só publica o que compila.** Antes do push, o nó de deploy compila a
+entrega no ambiente da própria stack — `next build`, `mvn compile`,
+`compileall` — e falha ali interrompe a publicação com o erro do compilador.
+Não é redundante com o passo de build da suíte: os tetos de circuit breaker
+roteiam ao gate humano **com a suíte vermelha**, de propósito, e um `sim` ali
+publicaria o que não compila. Foi exatamente assim que uma entrega Next.js
+quebrada chegou ao GitHub depois de 38 testes verdes e revisão aprovada. A
+verificação roda contra o disco, não contra estado guardado: thread retomada
+dias depois prova de novo.
 
 O nome do repositório sai do pedido, não do `thread_id` — um UUID não diz nada
 a quem abre a lista de repositórios. A criação é idempotente: retomar a thread

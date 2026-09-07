@@ -9,6 +9,7 @@ uma queda no meio (erro 503 do provedor, Ctrl+C, crash) não perde o progresso:
 retome com --thread e o grafo continua do último nó concluído.
 """
 import argparse
+import os
 import uuid
 
 import truststore
@@ -21,8 +22,9 @@ truststore.inject_into_ssl()
 
 load_dotenv(override=True)
 
+from src.squad.adaptadores import perfis  # noqa: E402
+from src.squad.adaptadores.metricas_json import registrar, resumo  # noqa: E402
 from src.squad.graph.workflow import DeployNegado, construir_grafo  # noqa: E402
-from src.squad.metricas import registrar, resumo  # noqa: E402
 
 
 def _rodar(grafo, entrada, config) -> None:
@@ -34,6 +36,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("pedido", nargs="*", help="Pedido para a squad")
     parser.add_argument("--thread", help="Retomar a execução com este thread id")
+    parser.add_argument(
+        "--stack",
+        help=f"Stack da entrega ({', '.join(perfis.nomes())}). "
+             f"Sem a flag, usa STACK do .env; sem ela, '{perfis.PERFIL_PADRAO}'.",
+    )
     args = parser.parse_args()
 
     grafo = construir_grafo()
@@ -49,12 +56,15 @@ def main() -> None:
         entrada = None  # None = continuar de onde parou
     else:
         pedido = " ".join(args.pedido) or "Criar endpoint de healthcheck"
+        # Resolve antes de criar a thread: uma stack digitada errada não deve
+        # deixar para trás um checkpoint e um arquivo de métricas órfãos.
+        perfil = perfis.obter(args.stack or os.getenv("STACK"))
         thread_id = str(uuid.uuid4())
         config = {"configurable": {"thread_id": thread_id}}
         print(f"Thread id desta execução: {thread_id}")
         print("(guarde para retomar com: python main.py --thread " + thread_id + ")")
-        entrada = {"pedido": pedido}
-        registrar(thread_id, "inicio_execucao", pedido=pedido)
+        entrada = {"pedido": pedido, "stack": perfil.nome}
+        registrar(thread_id, "inicio_execucao", pedido=pedido, stack=perfil.nome)
 
     # O gate humano entra no try: negar o deploy levanta, e esse desfecho é tão
     # informativo quanto uma queda do provedor. Com os dois lados cobertos, um

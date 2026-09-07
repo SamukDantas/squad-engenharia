@@ -24,13 +24,6 @@ TIMEOUT_GIT = 60  # segundos por comando git
 TIMEOUT_GH = 60   # segundos por comando gh
 LIMITE_SLUG = 50  # chars do nome do repositório derivado do pedido
 
-_GITIGNORE_ENTREGA = (
-    "__pycache__/\n.pytest_cache/\n.ruff_cache/\n.squad/\n*.pyc\n"
-    # Rastro de comandos rodados pelo executor: não é entrega.
-    "*.log\n*_output.txt\n*_result.txt\n*_results.txt\n"
-)
-
-
 def _git(workspace: str, *args: str) -> str:
     comando = ["git", *args]
     try:
@@ -200,11 +193,12 @@ def _ref_de_push(workspace: str, url: str, thread_id: str) -> str:
     return "main"
 
 
-def executar_deploy(workspace: str, thread_id: str, pedido: str) -> dict:
+def executar_deploy(workspace: str, thread_id: str, pedido: str, perfil) -> dict:
     raiz = Path(workspace)
 
-    # A entrega não leva lixo de execução (caches do pytest/CPython).
-    (raiz / ".gitignore").write_text(_GITIGNORE_ENTREGA, encoding="utf-8")
+    # A entrega não leva lixo de execução, e o que é lixo depende da stack: sem
+    # `node_modules/` na lista, uma entrega Next.js iria inteira para o push.
+    (raiz / ".gitignore").write_text(perfil.gitignore_entrega, encoding="utf-8")
 
     if not (raiz / ".git").is_dir():
         _git(workspace, "init")

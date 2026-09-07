@@ -18,9 +18,8 @@ definir_arquitetura:
     não estejam neles. Se um requisito do contexto não se aplicar, ignore-o em
     vez de substituí-lo por outro tema. Produza: componentes, contratos de API,
     modelo de dados (se aplicável) e decisões com trade-offs.
-    A entrega será implementada em Python, usando apenas a biblioteca padrão
-    e estas libs pré-instaladas: fastapi, flask, httpx, requests — não
-    proponha outras tecnologias.
+    A entrega será implementada na stack {stack}, usando apenas
+    {libs_permitidas} — não proponha outras tecnologias.
     Limite a spec a no máximo 150 linhas, focando no essencial para implementar.
   expected_output: >
     Spec técnica enxuta (máx. 150 linhas) em markdown, estritamente sobre
@@ -30,12 +29,12 @@ definir_arquitetura:
 # --- Crew de desenvolvimento (sequencial: backend -> frontend -> consolidação) ---
 implementar_backend:
   description: >
-    Implemente a parte de backend da spec abaixo escrevendo ARQUIVOS PYTHON
-    REAIS no workspace com a ferramenta escrever_arquivo — não descreva
-    código em markdown. Use apenas a biblioteca padrão do Python e estas
-    libs pré-instaladas: fastapi, flask, httpx, requests (importar qualquer
-    outra lib fará os testes quebrarem). Coloque os módulos na raiz do
-    workspace ou em subpastas com nomes claros.
+    Implemente a parte de backend da spec abaixo escrevendo ARQUIVOS REAIS
+    no workspace com a ferramenta escrever_arquivo — não descreva código em
+    markdown. Stack: {stack}. Use apenas {libs_permitidas} (importar
+    qualquer outra dependência fará os testes quebrarem: não há instalação
+    em runtime). Coloque os módulos na raiz do workspace ou em subpastas
+    com nomes claros.
     Se houver feedback de QA de uma rodada anterior, use listar_arquivos e
     ler_arquivo para conhecer o estado atual e corrija os pontos apontados
     antes de qualquer coisa.
@@ -50,7 +49,8 @@ implementar_frontend:
   description: >
     Com base no backend implementado (manifesto no contexto anterior),
     escreva no workspace a camada de consumo como ARQUIVOS REAIS usando
-    escrever_arquivo: cliente Python de integração e exemplos de uso.
+    escrever_arquivo: cliente de integração e exemplos de uso, na mesma
+    stack ({stack}).
     Antes de escrever, use listar_arquivos e ler_arquivo para conhecer o
     backend real — importe e chame o que existe, não invente módulos.
     Se a spec não exigir UI, entregue apenas integração e exemplos.
@@ -68,10 +68,9 @@ consolidar_entrega:
     estrutura de arquivos e as instruções de execução.
     Escreva também `.squad/run.json` declarando como subir a aplicação como
     servidor HTTP, para o pipeline de segurança atacá-la. Formato exato:
-    {"cmd": ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"],
-    "port": 8000, "health_path": "/docs"}. Use o comando real desta entrega
-    (módulo/porta corretos; Flask usa flask --app <mod> run --host 0.0.0.0
-    --port <p>); health_path é uma rota que responde com a app no ar.
+    {exemplo_run_json}
+    Use o comando real desta entrega (módulo e porta corretos); health_path
+    é uma rota que responde com a app no ar.
   expected_output: >
     Manifesto final dos arquivos da entrega, com o README.md e o
     .squad/run.json incluídos.
@@ -80,28 +79,27 @@ consolidar_entrega:
 # --- Crew de qualidade ---
 escrever_testes:
   description: >
-    Escreva testes pytest REAIS no diretório tests/ do workspace usando a
-    ferramenta escrever_arquivo, validando os critérios de aceite da spec
-    contra o código real do projeto. Antes de escrever, use listar_arquivos
-    e ler_arquivo para conhecer os módulos reais. Arquivos atuais do
-    workspace: {arquivos}
-    Os testes serão executados com pytest a partir da raiz do workspace:
-    importe os módulos pelos caminhos reais e não invente módulos que não
-    existem. Não use libs além de pytest e das pré-instaladas (fastapi,
-    flask, httpx, requests).
+    Escreva testes REAIS no workspace usando a ferramenta escrever_arquivo,
+    validando os critérios de aceite da spec contra o código real do
+    projeto. Antes de escrever, use listar_arquivos e ler_arquivo para
+    conhecer os módulos reais. Arquivos atuais do workspace: {arquivos}
+    {instrucoes_qa}
+    Importe os módulos pelos caminhos reais e não invente módulos que não
+    existem. Não use dependências além de {libs_permitidas} e do próprio
+    runner de testes.
     Se houver retorno de uma rodada anterior (abaixo), trate-o como
     prioridade: reescreva ou complemente os testes conforme apontado.
     Spec: {spec}
     Retorno da rodada anterior (se houver): {feedback_qa}
   expected_output: >
-    Manifesto dos arquivos de teste criados em tests/, com uma linha sobre
+    Manifesto dos arquivos de teste criados, com uma linha sobre
     o que cada um cobre.
   agent: qa_engineer
 
 revisar:
   description: >
     Os testes automatizados JÁ FORAM EXECUTADOS pelo pipeline e PASSARAM;
-    a saída real do pytest está abaixo. Sua revisão cobre o que a execução
+    a saída real do {runner} está abaixo. Sua revisão cobre o que a execução
     não pega: legibilidade, segurança e aderência do código à spec.
 
     REPROVAR custa uma rodada inteira de desenvolvimento, então o veredito
@@ -125,7 +123,7 @@ revisar:
     Conclua com o veredito exato APROVADO ou REPROVADO na última linha. Ao
     reprovar, liste antes do veredito apenas as correções bloqueantes.
     Revisão da rodada anterior: {revisao_anterior}
-    Saída do pytest: {saida_testes}
+    Saída do {runner}: {saida_testes}
     Código (lido do workspace): {codigo}
     Spec: {spec}
   expected_output: >
