@@ -97,6 +97,20 @@ def _do_perfil(perfil) -> dict:
     }
 
 
+LIMITE_RESPOSTA_GUARD = 200
+
+
+def _resposta_curta(resposta: object) -> str:
+    """A resposta crua do guard, guardada na métrica.
+
+    Sem isto o histórico só tem o booleano, e o booleano não permite auditar a
+    decisão nem reprocessar o parser: quando `veredito_sim` mudou, as 65
+    decisões já gravadas eram inúteis para medir o efeito da mudança. Cabe em
+    200 chars porque a pergunta pede uma palavra — resposta longa já é sinal.
+    """
+    return " ".join(str(resposta).split())[:LIMITE_RESPOSTA_GUARD]
+
+
 def _perfil(state: EstadoProjeto):
     """A stack desta execução, vinda do estado.
 
@@ -500,7 +514,7 @@ def no_validacao_spec(state: EstadoProjeto, config: RunnableConfig) -> EstadoPro
             f"Especificação:\n{state['spec'][:8000]}"
         ))
         coerente = veredito_sim(veredito)
-        m.update(spec_coerente=coerente)
+        m.update(spec_coerente=coerente, resposta_guard=_resposta_curta(veredito))
     if not coerente:
         print(f">>> Guard: spec reprovada (não adere ao pedido). Veredito: {str(veredito)[:40]}")
     return {"spec_coerente": coerente}
@@ -607,7 +621,7 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
             f"\n\nTestes:\n{testes}"
         ))
         aderentes = veredito_sim(veredito)
-        m.update(testes_aderentes=aderentes)
+        m.update(testes_aderentes=aderentes, resposta_guard=_resposta_curta(veredito))
 
     if not aderentes:
         print(">>> Guard de critérios: testes não cobrem os critérios de aceite.")
