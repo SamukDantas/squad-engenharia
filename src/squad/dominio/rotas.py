@@ -22,14 +22,18 @@ from typing import Any, Mapping
 # caro tem o seu, para não consumir sozinho o que é do pytest.
 MAX_TENTATIVAS = 3
 MAX_REPLANEJAMENTOS = 2
+MAX_DECOMPOSICOES = 2         # rodadas que uma decomposição inválida pode custar
 MAX_TESTES = 2                # reescritas da suíte por rodada de desenvolvimento
 MAX_REVISOES = 2              # rodadas que a opinião do revisor pode custar
 MAX_PENTEST = 2               # rodadas que uma reprovação de pentest pode custar
 MAX_VISUAL = 2                # rodadas que uma reprovação de renderização pode custar
+MAX_AMBIENTES = 2             # rodadas que uma configuração de ambiente errada pode custar
 
 # Origens de feedback que reprovam **código**, não suíte: a correção muda o
 # código, então os testes precisam rodar de novo, não ser reescritos.
-ORIGENS_QUE_PRESERVAM_A_SUITE = frozenset({"revisao", "pentest", "visual"})
+ORIGENS_QUE_PRESERVAM_A_SUITE = frozenset(
+    {"revisao", "pentest", "visual", "ambientes"}
+)
 
 Estado = Mapping[str, Any]
 
@@ -125,7 +129,10 @@ def pos_testes(state: Estado) -> Decisao:
     # QA reescreve, sem pagar outra rodada de desenvolvimento.
     if not state.get("cobertura_ok") and state.get("testes_tentativas", 0) < MAX_TESTES:
         return Decisao(destino="escrever_testes")
-    return Decisao(destino="revisao")
+    # Antes da revisão, e não depois, porque é o juiz mais barato que ainda não
+    # falou: lê arquivo, sem container e sem LLM. Reprovar aqui poupa uma
+    # revisão inteira sobre uma entrega que voltaria ao dev de qualquer jeito.
+    return Decisao(destino="config_ambientes")
 
 
 def pos_revisao(state: Estado) -> Decisao:
@@ -207,3 +214,56 @@ def pos_visual(state: Estado) -> Decisao:
             destino="aprovacao_humana", teto=Teto("correcao", MAX_TENTATIVAS)
         )
     return Decisao(destino="desenvolvimento")
+
+
+def pos_config_ambientes(state: Estado) -> Decisao:
+    """Teto próprio, pela mesma razão do teto do visual.
+
+    A stack que não exige configuração por ambiente chega aqui com
+    `ambientes_ok=True` e passa direto — o nó existe sempre no grafo, como o
+    pentest e o visual, e é o perfil que decide se ele tem algo a dizer.
+
+    Ao estourar o teto segue para a revisão em vez de ir ao gate: diferente de
+    teste vermelho, uma configuração errada não invalida o julgamento do
+    revisor, e o achado fica no estado para o gate humano ver.
+    """
+    if state.get("ambientes_ok", True):
+        return Decisao(destino="revisao")
+    if state.get("ambientes_tentativas", 0) >= MAX_AMBIENTES:
+        return Decisao(
+            destino="revisao",
+            teto=Teto("ambientes", MAX_AMBIENTES),
+            aviso=(
+                f">>> Ambientes reprovaram {MAX_AMBIENTES}x: teto atingido, "
+                "seguindo para a revisão com os achados no estado."
+            ),
+        )
+    if state["tentativas"] >= MAX_TENTATIVAS:
+        return Decisao(
+            destino="aprovacao_humana", teto=Teto("correcao", MAX_TENTATIVAS)
+        )
+    return Decisao(destino="desenvolvimento")
+
+
+def pos_decomposicao(state: Estado) -> Decisao:
+    """A decomposição precisa ser válida antes de virar N ramos.
+
+    Reprovar aqui é barato — uma chamada de crew. Deixar passar não é: um nome
+    repetido faz dois ramos escreverem no mesmo workspace, e o sintoma aparece
+    como container recusado por nome duplicado, muito longe da causa.
+    """
+    if not state.get("erros_decomposicao"):
+        return Decisao(destino="contratos")
+    if state.get("servicos_tentativas", 0) > MAX_DECOMPOSICOES:
+        return Decisao(
+            teto=Teto("decomposicao", MAX_DECOMPOSICOES),
+            erro=(
+                f"A decomposição do pedido falhou {MAX_DECOMPOSICOES + 1} vezes "
+                "seguidas. Interrompendo para evitar desperdício de tokens. "
+                f"Último motivo: {state['erros_decomposicao']}"
+            ),
+        )
+    return Decisao(
+        destino="decomposicao",
+        aviso=f">>> Decomposição inválida, refazendo: {state['erros_decomposicao']}",
+    )

@@ -127,15 +127,49 @@ def test_verde_sem_cobertura_faz_o_laco_curto_do_qa():
     assert d.destino == "escrever_testes"
 
 
-def test_verde_sem_cobertura_mas_sem_orcamento_de_qa_segue_para_revisao():
+def test_verde_sem_cobertura_mas_sem_orcamento_de_qa_segue_em_frente():
     d = rotas.pos_testes(
         estado(testes_ok=True, cobertura_ok=False, testes_tentativas=MAX_TESTES)
     )
+    assert d.destino == "config_ambientes"
+
+
+def test_verde_e_coberto_vai_aos_ambientes_antes_da_revisao():
+    """A configuração de ambientes é o juiz mais barato que ainda não falou —
+    lê arquivo, sem container e sem LLM. Reprovar ali poupa uma revisão inteira
+    sobre uma entrega que voltaria ao dev de qualquer jeito."""
+    assert rotas.pos_testes(
+        estado(testes_ok=True, cobertura_ok=True)
+    ).destino == "config_ambientes"
+
+
+# ---------- configuração por ambiente ----------
+
+def test_stack_sem_exigencia_de_ambientes_passa_direto():
+    """Python e Next.js chegam aqui sem o campo no estado. O nó existe sempre no
+    grafo, e é o perfil que decide se ele tem algo a dizer."""
+    assert rotas.pos_config_ambientes(estado()).destino == "revisao"
+
+
+def test_ambientes_ok_segue_para_a_revisao():
+    assert rotas.pos_config_ambientes(estado(ambientes_ok=True)).destino == "revisao"
+
+
+def test_ambientes_reprovados_voltam_ao_desenvolvimento():
+    d = rotas.pos_config_ambientes(
+        estado(ambientes_ok=False, ambientes_tentativas=0)
+    )
+    assert d.destino == "desenvolvimento"
+
+
+def test_teto_de_ambientes_segue_para_a_revisao_nao_para_o_gate():
+    """Diferente de teste vermelho, configuração errada não invalida o
+    julgamento do revisor — e o achado fica no estado para o gate humano ver."""
+    d = rotas.pos_config_ambientes(
+        estado(ambientes_ok=False, ambientes_tentativas=rotas.MAX_AMBIENTES)
+    )
     assert d.destino == "revisao"
-
-
-def test_verde_e_coberto_vai_a_revisao():
-    assert rotas.pos_testes(estado(testes_ok=True, cobertura_ok=True)).destino == "revisao"
+    assert d.teto == rotas.Teto("ambientes", rotas.MAX_AMBIENTES)
 
 
 # ---------- os três sinais caros, com teto próprio ----------
@@ -201,7 +235,7 @@ def test_todo_teto_nomeia_um_laco_conhecido():
     """O painel agrupa por `laco`; um nome novo entrando calado viraria uma
     categoria órfã na tela de série."""
     conhecidos = {"planejamento", "escrever_testes", "correcao", "revisao",
-                  "pentest", "visual"}
+                  "pentest", "visual", "ambientes"}
     disparos = [
         rotas.pos_validacao_spec(estado(spec_tentativas=MAX_REPLANEJAMENTOS + 1)),
         rotas.pos_validacao_testes(estado(testes_tentativas=MAX_TESTES)),
@@ -209,6 +243,9 @@ def test_todo_teto_nomeia_um_laco_conhecido():
         rotas.pos_revisao(estado(revisao_tentativas=MAX_REVISOES)),
         rotas.pos_pentest(estado(pentest_tentativas=MAX_PENTEST)),
         rotas.pos_visual(estado(visual_tentativas=MAX_VISUAL)),
+        rotas.pos_config_ambientes(
+            estado(ambientes_ok=False, ambientes_tentativas=rotas.MAX_AMBIENTES)
+        ),
     ]
     for d in disparos:
         assert d.teto is not None
