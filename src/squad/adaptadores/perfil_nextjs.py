@@ -36,6 +36,19 @@ _SUFIXOS_TESTE = (".test.ts", ".test.tsx", ".test.js", ".test.jsx",
                   ".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx")
 
 _LIBS = "next, react, react-dom"
+# As versões da imagem (Dockerfile.sandbox-nextjs e Dockerfile.target-nextjs).
+# Vão no prompt do executor: sem elas, um modelo que "moderniza" o package.json
+# escreve código para uma API que a jaula não tem.
+_VERSOES = "next 15.1.3, react 18.3.1, react-dom 18.3.1, typescript 5.7.2"
+
+# Toda cópia da entrega para dentro de um container descarta o `node_modules`
+# dela. O executor roda no host, com rede, e pode instalar pacotes no
+# workspace; o resolvedor do Node acha primeiro o `node_modules` mais próximo, e
+# o da entrega vence o da imagem, um nível acima. Medido na thread `00b92498`:
+# o executor instalou next 15.5.4 e react 19.1, o `next` da imagem (15.1.3)
+# carregou o react 19 da entrega e o build morreu em `createClientModuleProxy`
+# — três rodadas de desenvolvimento gastas numa falha que era de ambiente.
+_COPIA = "cp -r /src /app/projeto && rm -rf /app/projeto/node_modules && cd /app/projeto"
 
 _GITIGNORE = (
     "node_modules/\n.next/\ndist/\nbuild/\ncoverage/\n.squad/\n"
@@ -123,12 +136,12 @@ def _comando_build() -> str:
     Roda em container próprio, antes da suíte. `.next/` fica na cópia dentro do
     container e some com ele: a entrega no host não é tocada.
     """
-    return f"cp -r /src /app/projeto && cd /app/projeto && {NEXT} build"
+    return f"{_COPIA} && {NEXT} build"
 
 
 def _comando_container(dir_saida: str) -> str:
     return (
-        f"cp -r /src /app/projeto && cd /app/projeto && "
+        f"{_COPIA} && "
         f"{VITEST} run --root . --config {ARQUIVO_CONFIG} "
         f"{_flags_cobertura(dir_saida)}"
     )
@@ -204,7 +217,7 @@ PERFIL = PerfilStack(
     extensoes_descartaveis=frozenset({".tsbuildinfo", ".map"}),
     gitignore_entrega=_GITIGNORE,
     imagem_alvo="squad-target-nextjs:latest",
-    preparo_alvo=f"{NEXT} build && ",
+    preparo_alvo=f"rm -rf node_modules && {NEXT} build && ",
     dockerfile_alvo="Dockerfile.target-nextjs",
     libs_permitidas=_LIBS,
     instrucoes_qa=(
@@ -213,9 +226,12 @@ PERFIL = PerfilStack(
         "partir da raiz do workspace."
     ),
     instrucoes_executor=(
-        "- TypeScript/React apenas, usando somente estas libs já instaladas: "
-        f"{_LIBS}. Não há `npm install` em runtime — import de qualquer outra "
-        "dependência quebra a suíte.\n"
+        "- TypeScript/React apenas, usando somente estas libs já instaladas, "
+        f"nestas versões exatas: {_VERSOES}. Escreva para essas versões (React "
+        "18, não 19) e declare-as assim no `package.json`.\n"
+        "- NÃO rode `npm install`, `npm i`, `yarn` nem `pnpm`, e não crie "
+        "`node_modules` no projeto: o build e os testes rodam sem rede, com as "
+        "dependências da imagem, e o que for instalado aqui é descartado.\n"
         "- NÃO escreva testes: nenhum `*.test.ts(x)`, `*.spec.ts(x)` nem nada "
         "dentro de `tests/`. A suíte é escrita por outro agente da equipe de "
         "qualidade.\n"
