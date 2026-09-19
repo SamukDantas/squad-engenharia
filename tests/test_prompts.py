@@ -16,10 +16,19 @@ import yaml
 
 RAIZ = Path(__file__).resolve().parents[1]
 
-# Campos que cada nó monta na hora, por tarefa.
+# Campos que os nós do **ramo** montam na hora. Todas as tarefas do pipeline de
+# um serviço rodam em crews que também recebem `_do_perfil()`.
 POR_TAREFA = {
     "pedido", "spec", "arquivos", "feedback_qa", "codigo", "saida_testes",
     "revisao_anterior",
+}
+
+# As crews do maestro são a exceção: rodam antes de existir stack de ramo, e
+# recebem só o que o nó delas monta. Declaradas aqui exatamente como o
+# `graph/maestro.py` as chama — divergir daqui é o erro que este teste pega.
+DO_MAESTRO = {
+    "decompor_servicos": {"pedido", "stack", "stacks_disponiveis", "max_servicos"},
+    "redigir_contratos": {"pedido", "servicos"},
 }
 
 
@@ -39,16 +48,48 @@ def _do_perfil() -> set[str]:
     return set(helper(perfis.obter("python")))
 
 
+def _fontes(nome: str) -> set[str]:
+    """O que a crew que roda ESTA tarefa de fato fornece.
+
+    Por tarefa e não global: a checagem antiga perguntava se o placeholder tinha
+    fonte em algum lugar da squad, e por isso deixou passar a tarefa de
+    arquitetura citando `{stack}` numa crew que não o recebia.
+    """
+    if nome in DO_MAESTRO:
+        return DO_MAESTRO[nome]
+    return POR_TAREFA | _do_perfil()
+
+
 def test_todo_placeholder_de_tarefa_tem_quem_o_preencha():
-    disponiveis = POR_TAREFA | _do_perfil()
     faltando = {
         (nome, ph)
         for nome, tarefa in _tasks().items()
         for campo in ("description", "expected_output")
         for ph in _placeholders(tarefa.get(campo, ""))
-        if ph not in disponiveis
+        if ph not in _fontes(nome)
     }
     assert not faltando, f"placeholders sem fonte: {sorted(faltando)}"
+
+
+def test_as_crews_do_maestro_nao_recebem_campos_de_perfil():
+    """Elas rodam antes de existir ramo, e portanto antes de existir stack de
+    entrega. Uma tarefa do maestro que passe a citar `{runner}` amanhã morre na
+    interpolação — este teste é quem avisa antes."""
+    for nome, fontes in DO_MAESTRO.items():
+        assert not (fontes & (_do_perfil() - {"stack"})), nome
+
+
+def test_o_maestro_passa_exatamente_o_que_as_tarefas_dele_pedem():
+    """Declarar a mais também é defeito: uma chave que ninguém usa é sinal de
+    que o prompt mudou e a declaração ficou para trás."""
+    from src.squad.graph import maestro  # noqa: F401  (garante que importa)
+
+    tarefas = _tasks()
+    for nome, fontes in DO_MAESTRO.items():
+        usados = set()
+        for campo in ("description", "expected_output"):
+            usados |= _placeholders(tarefas[nome].get(campo, ""))
+        assert usados <= fontes, (nome, usados - fontes)
 
 
 def test_campos_do_perfil_vao_para_todas_as_crews():

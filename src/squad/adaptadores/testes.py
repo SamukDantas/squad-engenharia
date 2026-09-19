@@ -15,6 +15,7 @@ pytest.
 """
 import os
 import subprocess
+import threading
 from pathlib import Path
 
 from ..portas.perfil import Cobertura, PerfilStack
@@ -27,6 +28,29 @@ from ..portas.testes import ResultadoTestes
 # caso já observado com folga. O teto continua existindo de propósito: contexto
 # gigante satura o modelo e devolve resposta vazia (item 5).
 LIMITE_SAIDA = 20_000
+
+def _limite_de_jaulas() -> int:
+    """Quantas jaulas podem rodar ao mesmo tempo.
+
+    Com ramos paralelos o fan-out pode ser largo, mas a jaula é o recurso
+    escasso: cada container Java pede 2,5 GB e 2 CPUs, e três ao mesmo tempo já
+    passam de 7 GB. A máquina afogada não devolve "sem memória" — devolve
+    TIMEOUT, que o pipeline lê como suíte travada e o dev lê como código ruim.
+    Um erro de recurso disfarçado de veredito de qualidade é o pior tipo.
+
+    Metade das CPUs, no máximo 4. `SQUAD_PARALELISMO` sobrepõe.
+    """
+    try:
+        pedido = int(os.getenv("SQUAD_PARALELISMO", "0"))
+    except ValueError:
+        pedido = 0
+    if pedido > 0:
+        return pedido
+    return max(1, min(4, (os.cpu_count() or 2) // 2))
+
+
+# Um por processo. Execução de entrega única nunca o disputa — só há um ramo.
+_JAULAS = threading.BoundedSemaphore(_limite_de_jaulas())
 
 # Diretório de trabalho da squad dentro do workspace — convenção da squad, não
 # da stack: é a única superfície de escrita montada no container.
@@ -114,12 +138,16 @@ def _rodar_docker(
         "sh", "-c", comando_sh,
     ]
     print(f">>> {rotulo} em sandbox Docker ({perfil.imagem_sandbox}, sem rede)...")
+    # A espera pela vaga fica FORA do `timeout`: o teto mede quanto a suíte
+    # demora, não quanto ela esperou a máquina desocupar. Contar a fila junto
+    # faria o terceiro ramo reprovar por TIMEOUT sem nunca ter rodado.
     try:
-        r = subprocess.run(
-            comando, capture_output=True, text=True, encoding="utf-8",
-            errors="replace", stdin=subprocess.DEVNULL,
-            timeout=perfil.timeout_testes,
-        )
+        with _JAULAS:
+            r = subprocess.run(
+                comando, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", stdin=subprocess.DEVNULL,
+                timeout=perfil.timeout_testes,
+            )
         return r.returncode, ((r.stdout or "") + "\n" + (r.stderr or "")).strip()
     except subprocess.TimeoutExpired as e:
         # Matar o cliente docker não mata o container: kill explícito.

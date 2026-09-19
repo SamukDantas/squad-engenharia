@@ -6,6 +6,9 @@ class EstadoProjeto(TypedDict, total=False):
     pedido: str          # demanda original do usuário
     thread_id: str       # id da execução; as funções de rota não recebem config
     stack: str           # perfil da stack da entrega (python, nextjs, java)
+    servico: str         # nome do microsserviço deste ramo ("" na entrega única)
+    contratos: str       # contrato entre serviços, congelado antes do fan-out
+    pronto: bool         # o ramo terminou em condição de ser publicado?
     workspace: str       # caminho absoluto de workspace/<thread_id>/
     spec: str            # saída da crew de planejamento
     spec_coerente: bool  # veredito do guard de aderência ao pedido
@@ -33,5 +36,8 @@ class EstadoProjeto(TypedDict, total=False):
     visual_ok: bool      # veredito de execução: entrega legível nos dois temas
     problemas_visuais: list[dict]  # achados da renderização (arquivo, tema, razão)
     visual_tentativas: int   # contador só das reprovações de verificação visual
+    ambientes_ok: bool   # veredito de leitura: dev/hml/prod configurados e sãos
+    achados_ambientes: list[dict]  # achados da configuração (tipo, ambiente, detalhe)
+    ambientes_tentativas: int      # contador só das reprovações de configuração
     deploy_ok: bool      # resultado do nó de deploy
     deploy_ref: str      # onde a entrega foi publicada (repo@branch ou commit local)

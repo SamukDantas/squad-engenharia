@@ -36,6 +36,7 @@ TIMEOUT_VISUAL = int(os.getenv("TIMEOUT_VISUAL", "180"))
 MEMORIA = "1g"   # Chromium não sobe em 512m
 CPUS = "1"
 LIMITE_FEEDBACK = 12  # achados listados no brief de correção
+LIMITE_LOG_ALVO = 4_000  # chars do log de boot devolvidos ao dev
 
 # Diretórios que não são a entrega vista pelo usuário.
 _IGNORAR = {"tests", ".squad", "node_modules", "__pycache__", ".git"}
@@ -70,12 +71,21 @@ def _formatar_feedback(problemas: list[dict]) -> str:
     """Brief de correção determinístico, no mesmo formato do pentest: cada
     achado vira um item com o seletor, o número medido e o exigido. Sem LLM no
     caminho — o feedback é a medição, não uma paráfrase dela."""
-    linhas = [
-        "A verificação visual reprovou a entrega. Os problemas abaixo foram "
-        "medidos num navegador real, com o tema do sistema emulado nos dois "
-        "modos. Corrija no CSS da própria página:",
-        "",
-    ]
+    # O cabeçalho segue o achado: mandar "corrija no CSS" para quem tem um
+    # servidor que não inicia aponta o dev para o lugar errado.
+    if any(p["tipo"] == "alvo_nao_sobe" for p in problemas):
+        linhas = [
+            "A verificação visual reprovou a entrega porque ela não entrou "
+            "no ar. O que segue veio do próprio processo, ao subir:",
+            "",
+        ]
+    else:
+        linhas = [
+            "A verificação visual reprovou a entrega. Os problemas abaixo "
+            "foram medidos num navegador real, com o tema do sistema emulado "
+            "nos dois modos. Corrija no CSS da própria página:",
+            "",
+        ]
     for i, p in enumerate(problemas[:LIMITE_FEEDBACK], 1):
         alvo = f"{p['arquivo']} (tema {p['tema']})"
         if p["tipo"] == "fundo_nao_declarado":
@@ -83,6 +93,14 @@ def _formatar_feedback(problemas: list[dict]) -> str:
                 f"{i}. [{p['tipo']}] {p['arquivo']} — {p['detalhe']}. Declare "
                 "background e color no body, e defina as cores como variáveis "
                 "redefinidas dentro de @media (prefers-color-scheme: dark)."
+            )
+        elif p["tipo"] == "alvo_nao_sobe":
+            linhas.append(
+                f"{i}. [{p['tipo']}] A ENTREGA NÃO INICIA. Ela compila e passa "
+                "nos testes, mas o servidor encerrou em vez de atender. Os "
+                "testes não pegam isto porque dublam o que falta; o log de boot "
+                "abaixo diz o que é. Corrija antes de qualquer outra coisa:\n"
+                f"{p.get('log', '(sem log)')}"
             )
         elif p["tipo"] == "pagina_nao_renderiza":
             linhas.append(f"{i}. [{p['tipo']}] {alvo} — {p['detalhe']}")
@@ -116,7 +134,7 @@ def _renderizar_arquivos(workspace: str, thread_id: str, paginas: list[str]) -> 
     print(f">>> Visual: renderizando {len(paginas)} página(s) em jaula sem rede...")
     r = subprocess.run(
         [
-            "docker", "run", "--rm", "--name", f"visual-{thread_id}",
+            "docker", "run", "--rm", "--name", infra.nome_de_rede("visual", thread_id),
             "--network", "none",
             "--memory", MEMORIA, "--cpus", CPUS,
             # A entrega entra read-only: renderizar não pode alterar o que está
@@ -152,8 +170,8 @@ def _renderizar_servida(workspace: str, thread_id: str, perfil) -> dict:
         (perfil.imagem_alvo, perfil.dockerfile_alvo),
     )
     run = infra.ler_run(workspace, "A verificação visual de SPA", _DESLIGAR)
-    rede = f"squad-visual-{thread_id}"
-    nome_alvo = f"alvo-visual-{thread_id}"
+    rede = infra.nome_de_rede("squad-visual", thread_id)
+    nome_alvo = infra.nome_de_rede("alvo-visual", thread_id)
     base = f"http://{nome_alvo}:{run['port']}/"
 
     print(f">>> Visual: subindo a entrega em rede interna isolada ({rede})...")
@@ -162,7 +180,7 @@ def _renderizar_servida(workspace: str, thread_id: str, perfil) -> dict:
         print(f">>> Visual: renderizando {base} e um nível de links...")
         r = subprocess.run(
             [
-                "docker", "run", "--rm", "--name", f"visual-{thread_id}",
+                "docker", "run", "--rm", "--name", infra.nome_de_rede("visual", thread_id),
                 "--network", rede,
                 "--memory", MEMORIA, "--cpus", CPUS,
                 IMAGEM, base,
@@ -171,8 +189,26 @@ def _renderizar_servida(workspace: str, thread_id: str, perfil) -> dict:
             timeout=TIMEOUT_VISUAL,
         )
         if r.returncode != 0:
-            # O log do alvo é o que explica uma entrega que não sobe — e sem ele
-            # o erro seria "a página não abriu", que não diz o porquê.
+            # Dois desfechos que o pipeline confundia, e que têm destinatários
+            # diferentes: a entrega que NÃO INICIA é defeito do dev, e o log de
+            # boot é a instrução de conserto; qualquer outra falha é da squad.
+            #
+            # Medido numa execução real: um serviço com 95,4% de cobertura,
+            # revisão aprovada e ambientes verdes não subia por uma propriedade
+            # Spring sem valor. O pipeline chamou isso de "verificação visual
+            # falhou" e truncou o traceback em 300 chars na métrica — a causa
+            # real ficou dentro do container e nunca chegou a ninguém.
+            if infra.morreu(nome_alvo):
+                return {
+                    "paginas": 0,
+                    "problemas": [{
+                        "tipo": "alvo_nao_sobe",
+                        "arquivo": "(a entrega inteira)",
+                        "tema": "-",
+                        "detalhe": "o servidor encerrou em vez de atender",
+                        "log": infra.logs(nome_alvo, LIMITE_LOG_ALVO),
+                    }],
+                }
             raise RuntimeError(
                 f"Verificação visual falhou (exit {r.returncode}):\n"
                 f"{(r.stderr or r.stdout).strip()[:800]}\n"

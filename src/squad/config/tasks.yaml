@@ -130,3 +130,45 @@ revisar:
     Revisão separando apontamentos bloqueantes de sugestões não bloqueantes,
     com o veredito final APROVADO/REPROVADO na última linha.
   agent: revisor_codigo
+
+# --- Crew de decomposicao: roda uma vez, antes do fan-out ---
+decompor_servicos:
+  description: >
+    Quebre o pedido a seguir em microsservicos: "{pedido}".
+    Uma fronteira por Agregado do dominio, nao por camada tecnica: nada de
+    "servico de banco" ou "servico de API". Se o pedido descreve um sistema
+    unico e coeso, devolva UM servico so - decompor o que nao precisa custa
+    tantas execucoes quanto ha servicos.
+    Stacks disponiveis: {stacks_disponiveis}. A stack sugerida para este pedido
+    e {stack}; use outra apenas se o papel do servico exigir (por exemplo, uma
+    interface web).
+    No maximo {max_servicos} servicos.
+    Em `depende_de`, liste apenas os servicos que este CHAMA. As dependencias
+    nao podem formar ciclo: se A chama B, B nao pode chamar A.
+  expected_output: >
+    APENAS um array JSON, sem texto antes ou depois, no formato:
+    [{{"nome": "room-service", "stack": "java", "responsabilidade": "dono do
+    Agregado Salas: disponibilidade e reserva", "depende_de": []}}]
+    Nomes em minusculas com hifen.
+  agent: arquiteto_de_sistemas
+
+redigir_contratos:
+  description: >
+    Redija o contrato entre os servicos abaixo, para o pedido "{pedido}".
+    Servicos decompostos:
+    {servicos}
+
+    Este contrato e congelado antes de qualquer servico ser construido, e os
+    times trabalham em paralelo sem se falar depois. Tudo o que um servico
+    precisa saber do outro tem de estar aqui. Para CADA chamada entre servicos,
+    diga: quem chama, quem responde, o metodo e a rota HTTP, os campos da
+    requisicao com tipo, os campos da resposta com tipo, e os codigos de erro.
+    Nomes de campo exatos: se o consumidor espera `totalSeats` e o provedor
+    devolve `capacity`, os dois passam nos proprios testes e a integracao
+    quebra. Servico que nao e chamado por ninguem nao entra.
+    Nao escreva codigo, nao escreva o schema do banco, nao repita a
+    responsabilidade dos servicos. No maximo 80 linhas.
+  expected_output: >
+    Contrato em markdown, no maximo 80 linhas, com uma secao por chamada entre
+    servicos, nomes de campo exatos e codigos de erro.
+  agent: arquiteto_de_sistemas

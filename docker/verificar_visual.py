@@ -179,7 +179,8 @@ def _medir(navegador, alvo: str, rotulo: str, problemas: list) -> tuple[list, bo
     Devolve os temas sem fundo declarado e se a resposta era HTML. O segundo
     importa: uma entrega de API responde JSON, e medir contraste num corpo JSON
     reprovaria toda API por ruído. O que não é HTML não é julgado aqui — nem
-    como achado, nem como página.
+    como achado, nem como página. Vale o mesmo para resposta fora do 2xx: página
+    de erro é do framework, não da entrega.
     """
     sem_fundo, era_html = [], False
     for tema in TEMAS:
@@ -187,6 +188,17 @@ def _medir(navegador, alvo: str, rotulo: str, problemas: list) -> tuple[list, bo
         aba = ctx.new_page()
         try:
             resposta = aba.goto(alvo, wait_until="load", timeout=20_000)
+            # Página de erro do framework não é a interface da entrega. Uma API
+            # REST não tem mapping para `/`, então o Spring serve ali a sua
+            # Whitelabel Error Page — HTML de verdade, com contraste de verdade,
+            # e que a entrega não escreveu. Medido numa execução real: os 5
+            # achados que reprovaram um serviço eram todos daquela página.
+            #
+            # A régua é o status, não o texto: o que não respondeu 2xx não é
+            # interface a julgar. O servidor continua contando como no ar — quem
+            # decide isso é `_esperar_alvo`, que aceita qualquer resposta.
+            if resposta is not None and not (200 <= resposta.status < 300):
+                continue
             tipo = (resposta.headers.get("content-type", "") if resposta else "")
             if "html" not in tipo.lower():
                 continue

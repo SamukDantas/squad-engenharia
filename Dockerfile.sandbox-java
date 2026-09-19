@@ -1,4 +1,4 @@
-# Jaula de execução dos testes da stack Java.
+# Jaula de execução dos testes da stack Java (Spring Boot).
 #
 # É a stack mais hostil ao --network none: o Maven baixa não só as dependências
 # como os próprios plugins do build. Um `mvn test` sem rede num repositório
@@ -6,11 +6,21 @@
 #
 # A solução é popular o `~/.m2` no build da imagem, rodando um projeto semente
 # de verdade — `dependency:go-offline` sozinho não basta, porque não resolve os
-# plugins que só são acionados durante o ciclo (surefire, jacoco). Em runtime o
-# `mvn -o` transforma qualquer coisa faltando num erro imediato, em vez de uma
-# espera até o timeout de rede.
+# plugins que só são acionados durante o ciclo (surefire, jacoco, repackage). Em
+# runtime o `mvn -o` transforma qualquer coisa faltando num erro imediato, em
+# vez de uma espera até o timeout de rede.
 #
-# Build (uma vez, e demora — baixa o repositório inteiro):
+# Com Spring, dois detalhes da semente deixaram de ser opcionais:
+#
+#   - ela roda `package`, não `test`. O goal `repackage` do
+#     spring-boot-maven-plugin só é acionado no `package`, e o alvo do pentest
+#     empacota a entrega antes de subir — sem passar por aqui, aquele primeiro
+#     `mvn -o package` falharia por plugin ausente, já sem rede;
+#   - ela tem um `@SpringBootTest`, não um `@Test` simples. A máquina de
+#     contexto de teste do Spring arrasta um conjunto próprio de artefatos que
+#     um teste JUnit puro nunca toca.
+#
+# Build (uma vez, e demora — baixa o repositório inteiro, agora com Spring):
 #   docker build -f Dockerfile.sandbox-java -t squad-sandbox-java:latest .
 FROM maven:3.9.9-eclipse-temurin-21
 
@@ -26,15 +36,19 @@ USER sandbox
 COPY --chown=sandbox:sandbox docker/pom-referencia.xml /home/sandbox/semente/pom.xml
 WORKDIR /home/sandbox/semente
 
-# Uma classe e um teste mínimos: rodar o ciclo de verdade é o que arrasta o
-# surefire, o jacoco e o compilador para o repositório local.
-RUN mkdir -p src/main/java/com/squad src/test/java/com/squad \
-    && printf 'package com.squad;\npublic class Semente { public int dobro(int n) { return n * 2; } }\n' \
-        > src/main/java/com/squad/Semente.java \
-    && printf 'package com.squad;\nimport org.junit.jupiter.api.Test;\nimport static org.junit.jupiter.api.Assertions.assertEquals;\nclass SementeTest { @Test void dobra() { assertEquals(4, new Semente().dobro(2)); } }\n' \
-        > src/test/java/com/squad/SementeTest.java \
-    && mvn -B -q test \
+# Um app Spring mínimo e um teste de contexto: rodar o ciclo até `package` é o
+# que arrasta surefire, jacoco, repackage e a infraestrutura de teste do Spring
+# para o repositório local.
+RUN mkdir -p src/main/java/com/squad src/test/java/com/squad src/main/resources \
+    && printf 'package com.squad;\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n@SpringBootApplication\npublic class SementeApplication { public static void main(String[] args) { SpringApplication.run(SementeApplication.class, args); } }\n' \
+        > src/main/java/com/squad/SementeApplication.java \
+    && printf 'package com.squad;\nimport org.junit.jupiter.api.Test;\nimport org.springframework.boot.test.context.SpringBootTest;\n@SpringBootTest\nclass SementeApplicationTest { @Test void contextoSobe() { } }\n' \
+        > src/test/java/com/squad/SementeApplicationTest.java \
+    && printf 'spring:\n  datasource:\n    url: jdbc:h2:mem:semente\n  jpa:\n    hibernate:\n      ddl-auto: create-drop\n' \
+        > src/main/resources/application.yml \
+    && mvn -B package \
     && test -f target/site/jacoco/jacoco.xml \
+    && test -f target/app.jar \
     && rm -rf target
 
 # A imagem base define MAVEN_CONFIG=/root/.m2, que o usuário sem privilégio não

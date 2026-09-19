@@ -111,6 +111,13 @@ class PerfilStack:
     # concatenado antes do `exec`.
     preparo_alvo: str = ""
 
+    # ---- configuracao por ambiente ----
+    # Se a entrega desta stack precisa declarar dev/hml/prod e ser medida por
+    # isso. Ligado so em Java: a exigencia nasce do Spring, que le a
+    # configuracao por perfil, e cobrar o mesmo de uma entrega Python seria a
+    # squad inventando um requisito que a spec nao pediu.
+    exige_ambientes: bool = False
+
     # ---- prompts ----
     libs_permitidas: str = ""        # ambiente pré-provisionado, citado ao executor
     instrucoes_qa: str = ""          # onde e como o QA escreve a suíte

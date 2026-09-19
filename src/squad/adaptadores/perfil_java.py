@@ -1,4 +1,4 @@
-"""Perfil da stack Java: Maven offline, JUnit 5, JaCoCo.
+"""Perfil da stack Java: Spring Boot sobre Maven offline, JUnit 5, JaCoCo.
 
 É a stack mais hostil ao `--network none`: o Maven baixa não só as dependências
 como os próprios plugins do build, e sem rede ele falha antes de compilar. A
@@ -10,6 +10,11 @@ A consequência é que o `pom.xml` da entrega não é livre: ele precisa declara
 exatamente as versões que estão no repositório local da imagem. O executor
 recebe o pom no prompt, e um desvio vira erro de build — que é a mesma régua de
 sempre, exit code manda.
+
+Spring é obrigatório aqui. Isso não é preferência de framework: é o que permite
+à entrega ter camada de adapters, entrypoint HTTP e persistência — e, por
+tabela, é o que faz os nós de pentest e de verificação visual deixarem de ser
+inócuos em Java, porque agora existe um servidor para subir e atacar.
 """
 import re
 from pathlib import Path
@@ -18,7 +23,11 @@ from ..portas.perfil import Cobertura, PerfilStack
 
 RELATORIO = "jacoco.xml"
 
-_LIBS = "a biblioteca padrão do JDK, JUnit 5 e JaCoCo (versões fixadas no pom)"
+_LIBS = (
+    "a biblioteca padrão do JDK 21 e o ecossistema Spring Boot 3.4 já presente "
+    "na imagem: spring-boot-starter-web, -data-jpa, -validation, -actuator e "
+    "-test, com H2 e PostgreSQL como drivers (versões fixadas pelo pom)"
+)
 
 _GITIGNORE = "target/\n.gradle/\n.squad/\n*.class\n*.log\n"
 
@@ -36,6 +45,30 @@ except OSError:  # instalação sem a árvore de docker/ ao lado
     )
 
 
+# A regra de banco por ambiente, dita ao executor e medida depois por
+# `adaptadores/config_spring.py`. Escrita uma vez e reaproveitada nos dois
+# lugares: instrução e medição que divergem produzem uma entrega que obedece ao
+# prompt e reprova na verificação, que é o pior dos mundos.
+AMBIENTES = ("dev", "hml", "prod")
+
+_INSTRUCOES_AMBIENTES = (
+    "- A entrega configura TRÊS ambientes, um arquivo por perfil em "
+    "`src/main/resources/`: `application-dev.yml`, `application-hml.yml` e "
+    "`application-prod.yml`, mais o `application.yml` comum.\n"
+    "- `dev` e os testes usam H2 em memória (`jdbc:h2:mem:...`), que é o único "
+    "banco que roda dentro da jaula sem rede. `hml` e `prod` usam PostgreSQL "
+    "(`jdbc:postgresql://...`) — o driver já está no classpath.\n"
+    "- Em `prod`, `spring.jpa.hibernate.ddl-auto` só pode ser `validate` ou "
+    "`none`. `create-drop` apaga o banco no boot, e `update` altera schema de "
+    "produção sem revisão.\n"
+    "- NENHUMA credencial literal nos YAML: use ${DB_URL}, ${DB_USER}, "
+    "${DB_PASSWORD}. Senha escrita no arquivo vai para o repositório junto "
+    "com o código.\n"
+    "- Os três ambientes apontam para URLs de banco diferentes. Três perfis "
+    "com a mesma URL não são três ambientes."
+)
+
+
 def _e_teste(caminho: str) -> bool:
     """Convenção do Maven: `src/test/java/...`. `src/main/java/` é entrega."""
     return caminho.startswith("src/test/")
@@ -46,11 +79,22 @@ def _preparar(workspace: str) -> None:
     entrega, e escrevê-lo é trabalho do executor."""
 
 
-# Sem `comando_build`: `mvn test` já compila antes de testar, e um passo
-# separado só pagaria outro start de container e de JVM. A contrapartida é que
-# um erro de compilação chega ao dev rotulado como falha de teste — mas a saída
-# do Maven diz "COMPILATION ERROR" na primeira linha, então a instrução não se
-# perde.
+def _comando_build() -> str:
+    """Compilação em passo separado, antes da suíte.
+
+    Antes não havia: `mvn test` já compila, e um passo próprio só pagava outro
+    start de container e de JVM. Com Spring a conta virou. Uma entrega que não
+    compila e uma cujo contexto não sobe são consertos diferentes — a primeira é
+    sintaxe ou import, a segunda é bean faltando ou datasource mal configurado —
+    e no `mvn test` as duas chegam ao dev como o mesmo bloco de saída, com o
+    erro real enterrado numa stack trace do Spring de centenas de linhas.
+
+    Separar devolve a distinção: falha aqui é `falha_de_build`, e o dev recebe
+    "a entrega NÃO COMPILA" com a saída do compilador, e nada mais.
+    """
+    return "cp -r /src /app/projeto && cd /app/projeto && mvn -o -B -q compile"
+
+
 def _comando_container(dir_saida: str) -> str:
     # `-o` offline: dependência faltando falha na hora, em vez de esperar o
     # timeout de rede num container que nem tem rota para fora.
@@ -146,6 +190,7 @@ PERFIL = PerfilStack(
     imagem_sandbox="squad-sandbox-java:latest",
     dockerfile_sandbox="Dockerfile.sandbox-java",
     runner="maven",
+    comando_build=_comando_build,
     comando_container=_comando_container,
     comando_verificacao=_comando_verificacao,
     comando_host=_comando_host,
@@ -153,32 +198,57 @@ PERFIL = PerfilStack(
     ler_cobertura=_ler_cobertura,
     preparar_workspace=_preparar,
     permite_host=False,
-    # JVM + Maven: o mais lento dos três, mesmo com o repositório já populado.
-    timeout_testes=420,
-    memoria="1500m",
+    # JVM + Maven + contexto Spring: o mais lento e o mais pesado dos três,
+    # mesmo com o repositório já populado. Subir o contexto custa segundos por
+    # classe de teste, e a folga de memória é o que separa um teste lento de um
+    # OOM que o pipeline leria como suíte vermelha.
+    timeout_testes=600,
+    memoria="2560m",
     e_teste=_e_teste,
     ignorar_no_workspace=frozenset({"target", ".gradle", ".mvn", ".squad", ".git"}),
     extensoes_descartaveis=frozenset({".class", ".jar"}),
     gitignore_entrega=_GITIGNORE,
+    exige_ambientes=True,
     imagem_alvo="squad-target-java:latest",
-    preparo_alvo="mvn -o -B -q compile && ",
+    # O alvo sobe o jar, então precisa do `package`: `compile` deixava
+    # `target/classes` e nenhum executável, e o `run.json` não tinha o que rodar.
+    preparo_alvo="mvn -o -B -q package -DskipTests && ",
     dockerfile_alvo="Dockerfile.target-java",
     libs_permitidas=_LIBS,
     instrucoes_qa=(
-        "Escreva testes JUnit 5 em `src/test/java/`, espelhando o pacote "
-        "da classe testada. Eles serão executados por `mvn test`."
+        "Escreva testes JUnit 5 em `src/test/java/`, espelhando o pacote da "
+        "classe testada. Eles serão executados por `mvn test`.\n"
+        "- Teste as regras de negócio com JUnit puro, SEM subir contexto: "
+        "entidades e casos de uso não dependem de Spring, e um `@SpringBootTest` "
+        "para verificar uma regra de domínio custa segundos de startup por classe "
+        "sem cobrir nada a mais.\n"
+        "- Use `@SpringBootTest` (ou `@WebMvcTest`) só onde o que está sob teste é "
+        "a integração: controller, serialização JSON, repositório JPA.\n"
+        "- O banco dos testes é H2 em memória, no perfil `test`. A suíte roda numa "
+        "jaula SEM REDE: teste que tenta alcançar host externo, banco externo ou "
+        "baixar algo falha por timeout, não por asserção.\n"
+        "- Dublês de teste são feitos à mão ou com o Mockito que já vem em "
+        "`spring-boot-starter-test`. Não acrescente dependência nenhuma."
     ),
     instrucoes_executor=(
-        f"- Java 21 apenas, usando {_LIBS}. Não acrescente dependência nenhuma "
-        "ao pom: o repositório Maven da imagem é offline, e o que não estiver "
-        "lá falha o build na hora.\n"
+        f"- Java 21 com Spring Boot 3.4, usando {_LIBS}. Não acrescente "
+        "dependência nenhuma ao pom: o repositório Maven da imagem é offline, e o "
+        "que não estiver lá falha o build na hora.\n"
         "- Use EXATAMENTE este `pom.xml`, sem alterar versões:\n"
         f"```xml\n{_POM_REFERENCIA}```\n"
         "- Código de produção em `src/main/java/`. NÃO escreva nada em "
-        "`src/test/java/` — a suíte é de outro agente da equipe de qualidade."
+        "`src/test/java/` — a suíte é de outro agente da equipe de qualidade.\n"
+        "- Arquitetura em camadas, com a dependência apontando sempre para dentro: "
+        "`entity` (regras de negócio, sem anotacao de framework) → `usecase` "
+        "(interactors e as interfaces de gateway que eles declaram) → `adapter` "
+        "(controllers REST, presenters, repositórios JPA que implementam aqueles "
+        "gateways) → a classe `@SpringBootApplication`. Entidade de domínio nao e "
+        "entidade JPA: se precisar persistir, escreva uma classe `@Entity` "
+        "separada no adapter e converta.\n"
+        f"{_INSTRUCOES_AMBIENTES}"
     ),
     exemplo_run_json=(
-        '{"cmd": ["java", "-cp", "target/classes", "com.squad.Main"], '
-        '"port": 8080, "health_path": "/health"}'
+        '{"cmd": ["java", "-jar", "target/app.jar"], '
+        '"port": 8080, "health_path": "/actuator/health"}'
     ),
 )

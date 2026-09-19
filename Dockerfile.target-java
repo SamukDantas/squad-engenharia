@@ -1,4 +1,5 @@
-# Alvo do pentest para a stack Java: sobe a entrega como servidor.
+# Alvo do pentest e da verificação visual para a stack Java: sobe a entrega
+# como servidor Spring Boot.
 #
 # Espelha a imagem do sandbox — mesmo `~/.m2` populado, mesmas versões — porque
 # entrega que passa nos testes e quebra no alvo por diferença de ambiente seria
@@ -9,7 +10,13 @@
 # alcançável pelo atacante. A contenção é a bridge Docker `--internal`, sem rota
 # para a internet (ver src/squad/pentest.py).
 #
-# Build (uma vez, e só se PENTEST_HABILITADO=1):
+# A semente aqui roda `package`, e não `compile` como antes: o preparo do alvo
+# empacota a entrega (`mvn -o package -DskipTests`) para subir o jar, e o goal
+# `repackage` só é baixado quando o ciclo chega ao `package`. Compilar apenas
+# deixava o plugin de fora e a falha aparecia lá, disfarçada de "o alvo não
+# respondeu".
+#
+# Build (uma vez, e só se PENTEST_HABILITADO=1 ou VISUAL_HABILITADO=1):
 #   docker build -f Dockerfile.target-java -t squad-target-java:latest .
 FROM maven:3.9.9-eclipse-temurin-21
 
@@ -21,10 +28,15 @@ USER alvo
 COPY --chown=alvo:alvo docker/pom-referencia.xml /home/alvo/semente/pom.xml
 WORKDIR /home/alvo/semente
 
-RUN mkdir -p src/main/java/com/squad \
-    && printf 'package com.squad;\npublic class Semente { }\n' \
-        > src/main/java/com/squad/Semente.java \
-    && mvn -B -q compile \
+RUN mkdir -p src/main/java/com/squad src/main/resources \
+    && printf 'package com.squad;\nimport org.springframework.boot.SpringApplication;\nimport org.springframework.boot.autoconfigure.SpringBootApplication;\n@SpringBootApplication\npublic class SementeApplication { public static void main(String[] args) { SpringApplication.run(SementeApplication.class, args); } }\n' \
+        > src/main/java/com/squad/SementeApplication.java \
+    && printf 'spring:\n  datasource:\n    url: jdbc:h2:mem:semente\n' \
+        > src/main/resources/application.yml \
+    && mvn -B package -DskipTests \
+    && test -f target/app.jar \
     && rm -rf target
+
+ENV MAVEN_CONFIG=/home/alvo/.m2
 
 WORKDIR /app

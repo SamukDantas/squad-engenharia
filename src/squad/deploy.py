@@ -193,7 +193,16 @@ def _ref_de_push(workspace: str, url: str, thread_id: str) -> str:
     return "main"
 
 
-def executar_deploy(workspace: str, thread_id: str, pedido: str, perfil) -> dict:
+def executar_deploy(
+    workspace: str, thread_id: str, pedido: str, perfil, nome: str | None = None
+) -> dict:
+    """`nome` dá o repositório quando quem publica sabe melhor que o pedido.
+
+    Numa execução paralela, o pedido é o mesmo para os três serviços — derivar o
+    slug dele daria três serviços disputando um repositório só. O nome do
+    serviço é o que distingue, e é ele que vira o repositório: um projeto, um
+    repositório, com microsserviço contando como projeto.
+    """
     raiz = Path(workspace)
 
     # A entrega não leva lixo de execução, e o que é lixo depende da stack: sem
@@ -222,7 +231,7 @@ def executar_deploy(workspace: str, thread_id: str, pedido: str, perfil) -> dict
         return {"deploy_ok": True, "deploy_ref": f"commit local {commit[:10]}"}
 
     _avisar_conta(dono)
-    alvo = f"{dono}/{_slug(pedido, thread_id)}"
+    alvo = f"{dono}/{_slug(nome or pedido, thread_id)}"
     url = f"https://github.com/{alvo}.git"
 
     # Idempotente de propósito: retomar a thread reexecuta este nó inteiro, e o

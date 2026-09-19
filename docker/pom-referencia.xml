@@ -13,11 +13,23 @@
   2. É o pom que o executor recebe no prompt e deve escrever. As versões são as
      mesmas por construção: se ele desviar, o `mvn -o` falha na hora, o que é a
      régua de sempre (exit code manda) em vez de uma espera até o timeout.
+
+  Spring é obrigatório na stack Java desta squad. As versões dos plugins de
+  build (compiler, surefire) vêm do `spring-boot-starter-parent` de propósito:
+  pinar por fora abriria a chance de a imagem baixar uma versão e a entrega
+  pedir outra, que é justamente o erro que o modo offline transforma em falha.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.4.1</version>
+    <relativePath/>
+  </parent>
 
   <groupId>com.squad</groupId>
   <artifactId>entrega</artifactId>
@@ -25,40 +37,92 @@
   <packaging>jar</packaging>
 
   <properties>
-    <maven.compiler.release>21</maven.compiler.release>
+    <java.version>21</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
 
   <dependencies>
     <dependency>
-      <groupId>org.junit.jupiter</groupId>
-      <artifactId>junit-jupiter</artifactId>
-      <version>5.11.3</version>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+    <!--
+      Actuator entra pelo health check: o alvo do pentest e o da verificação
+      visual esperam até uma rota responder antes de julgar a entrega, e sem um
+      endpoint de saúde de verdade esse contrato vira adivinhação sobre qual
+      rota da entrega serve de sinal de vida.
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <!--
+      Os dois drivers ficam na imagem porque a entrega configura três ambientes:
+      H2 em memória é o único banco que cabe na jaula sem rede (dev/test), e
+      PostgreSQL é o de homologação e produção. O driver de produção precisa
+      estar no classpath para o build validar a configuração dela.
+    -->
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>
 
   <build>
+    <!--
+      Nome fixo do artefato: o `run.json` que sobe a entrega como alvo precisa
+      dizer `java -jar target/app.jar` sem adivinhar como o executor nomeou o
+      projeto.
+    -->
+    <finalName>app</finalName>
     <plugins>
       <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.13.0</version>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.5.2</version>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
       </plugin>
       <!--
         JaCoCo preso ao ciclo: `prepare-agent` antes dos testes e `report` na
         fase `test`. Sem isso, `mvn test` rodaria a suíte e não deixaria
         relatório nenhum, e o piso de cobertura reprovaria toda entrega.
+
+        Os `excludes` não são conveniência: o piso por módulo (60%) elege o
+        arquivo menos coberto da entrega, e a classe `@SpringBootApplication`
+        e as `@Configuration` ficam em 0% porque ninguém as testa diretamente.
+        Sem excluí-las, elas sequestram o pior-módulo em toda entrega Spring e
+        o veredito deixa de falar sobre o código que a spec descreve. É o mesmo
+        defeito que o `next.config.mjs` causou na stack Next.js.
       -->
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
         <version>0.8.12</version>
+        <configuration>
+          <excludes>
+            <exclude>**/*Application.class</exclude>
+            <exclude>**/config/**</exclude>
+          </excludes>
+        </configuration>
         <executions>
           <execution>
             <id>preparar</id>
