@@ -598,18 +598,21 @@ def _nome_repo(state: EstadoProjeto) -> str:
     precisa estar pronto antes do gate para o humano ver para onde está
     autorizando a publicação. Gravado no checkpoint, retomar a thread publica
     no mesmo repositório em vez de sortear outro nome. Uma chamada barata; se
-    ela falhar ou vier fora do formato, a regra determinística assume — nome
-    de repositório não é motivo para derrubar a execução.
+    ela falhar, demorar ou vier fora do formato, a regra determinística
+    assume — nome de repositório não é motivo para derrubar nem para segurar
+    a execução.
     """
     try:
-        resposta = com_retry("nome do repositório", lambda: squad_llm().call(
+        # Sem com_retry e com teto curto: repetir uma chamada dispensável só
+        # troca uma espera longa por outra (ver squad_llm, acessoria).
+        resposta = squad_llm(acessoria=True).call(
             "Dê um nome curto para o repositório do projeto descrito abaixo: 2 a "
             "3 palavras em português, minúsculas, sem acento, separadas por "
             "hífen, dizendo O QUE o sistema é — não o verbo do pedido nem a "
             "linguagem. Responda APENAS com o nome. Exemplos: "
             "conversor-temperatura, api-reserva-salas, dashboard-funil-vendas.\n\n"
             f"Pedido:\n{state['pedido'][:2000]}"
-        ))
+        )
     except Exception as e:  # noqa: BLE001 — qualquer falha cai no fallback
         print(f">>> Nome do repositório: chamada falhou ({type(e).__name__}); usando regra.")
         resposta = ""

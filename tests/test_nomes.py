@@ -75,8 +75,10 @@ class _LLM:
     def __init__(self, respostas):
         self.respostas = list(respostas)
         self.prompts = []
+        self.acessoria = []
 
-    def __call__(self):
+    def __call__(self, *_, acessoria=False):
+        self.acessoria.append(acessoria)
         return self
 
     def call(self, prompt):
@@ -136,8 +138,26 @@ def test_resposta_ruim_cai_na_regra(monkeypatch, sem_metricas):
 
 
 def test_falha_do_provedor_no_nome_nao_derruba_a_execucao(monkeypatch, sem_metricas):
-    monkeypatch.setattr(workflow, "com_retry", lambda _nome, fn, **_: fn())
     llm = _LLM(["SIM", RuntimeError("gateway fora")])
     monkeypatch.setattr(workflow, "squad_llm", llm)
     saida = workflow.no_validacao_spec(_estado(), {"configurable": {"thread_id": "t"}})
     assert saida == {"spec_coerente": True, "nome_repo": "modulo-python-conversao"}
+
+
+def test_nome_usa_teto_curto_e_o_guard_nao(monkeypatch, sem_metricas):
+    """Chamada dispensável não herda o teto das que importam (~27 min com as
+    repetições): um gateway lento não pode segurar a execução por um nome."""
+    llm = _LLM(["SIM", "calculadora-juros"])
+    monkeypatch.setattr(workflow, "squad_llm", llm)
+    workflow.no_validacao_spec(_estado(), {"configurable": {"thread_id": "t"}})
+    assert llm.acessoria == [False, True]
+
+
+def test_llm_acessoria_tem_teto_curto_sem_repeticao(monkeypatch):
+    from src.squad import llm as modulo
+    monkeypatch.setenv("LLM_PROVEDOR", "gateway")
+    monkeypatch.delenv("TIMEOUT_LLM_ACESSORIA", raising=False)
+    curto = modulo.squad_llm(acessoria=True)
+    normal = modulo.squad_llm()
+    assert (curto.timeout, curto.max_retries) == (30, 0)
+    assert normal.timeout == modulo._timeout() and normal.max_retries > 0
