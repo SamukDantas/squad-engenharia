@@ -39,7 +39,9 @@ ilegível no tema escuro (1,28:1 medido, exigido 4,5:1).
 O nó de desenvolvimento é **intercambiável** (`DEV_EXECUTOR`): por padrão usa
 o **OpenCode CLI** em modo headless como mão de obra, com a squad no papel de
 gerência (guard, QA real e gate governando o executor); `crews` mantém o
-caminho com as crews CrewAI, sem dependência externa.
+caminho com as crews CrewAI, sem dependência externa. Do mesmo jeito, o
+**provedor de LLM** é escolhido por `LLM_PROVEDOR` (gateway gateway corporativo on-premise
+ou OpenCode Zen), sem mudar nada na governança do grafo.
 
 O **guard de aderência** é uma chamada única de LLM (barata) que confere se a
 spec produzida trata mesmo do pedido antes de gastar tokens com o
@@ -68,11 +70,13 @@ squad-engenharia/
     │   └── tasks.yaml          # definição das tarefas de cada crew
     ├── portas/                 # as formas: perfil de stack, testes, executor, métricas
     ├── adaptadores/            # implementações: perfil python, runner de testes, opencode, métricas
+    │   └── keycloak_token.py   # token do gateway corporativo: lê e renova o login do OpenCode
     ├── dominio/                # as decisões, sem nenhuma tecnologia
     │   ├── rotas.py            # para onde ir depois de cada nó, e os tetos
     │   ├── guards.py           # entrega vazia e rodada que não corrigiu nada
     │   ├── vereditos.py        # leitura de SIM/NAO e APROVADO/REPROVADO
     │   └── orcamento.py        # repartição do contexto enviado ao LLM
+    ├── llm.py                  # LLM da squad: provedor gateway corporativo ou Zen (LLM_PROVEDOR)
     ├── tools.py                # ferramentas de arquivo confinadas ao workspace
     ├── alvo.py                 # sobe a entrega como servidor em rede isolada
     ├── visual.py               # renderiza a entrega e mede contraste (Docker)
@@ -349,7 +353,8 @@ aparece é `Repository not found` — `gh auth switch --user <conta>` resolve.
 ## Documentação adicional
 
 - [docs/ARQUITETURA.md](docs/ARQUITETURA.md) — diagrama de sequência completo
-  do fluxo (workspace, pytest como juiz, laço de correções e gates).
+  do fluxo (workspace, pytest como juiz, laço de correções, gates e o
+  provedor de LLM com o token Keycloak).
 - [docs/RESILIENCIA.md](docs/RESILIENCIA.md) — problemas reais encontrados
   (autenticação, alucinação, quedas de provedor, loops) com causa raiz,
   solução e o princípio de arquitetura por trás de cada um.
@@ -393,19 +398,60 @@ aparece é `Repository not found` — `gh auth switch --user <conta>` resolve.
 - A crew de desenvolvimento é sequencial (backend → integração → tech lead
   consolida), sem delegação dinâmica — mais determinística e barata.
 
-## Provedor de LLM: OpenCode Zen
+## Provedor de LLM: gateway corporativo ou OpenCode Zen
 
-A squad usa o [OpenCode Zen](https://opencode.ai/docs/zen) como provedor,
-via API compatível com OpenAI (`https://opencode.ai/zen/v1`). Configure no `.env`:
+`LLM_PROVEDOR` escolhe quem responde aos agentes. O fluxo, com a checagem do
+token, está no diagrama de sequência do [ARQUITETURA.md](docs/ARQUITETURA.md).
+
+### Gateway corporativo de IA (padrão)
+
+Gateway on-premise cedido por um cliente, compatível com OpenAI
+(`https://ai-gateway.example.com/v1`), com um único
+modelo, `gateway`. Não autentica por chave: autentica por **token Keycloak**,
+o mesmo que o plugin `keycloak-token.ts` do OpenCode obtém. Por isso há um
+passo manual, **uma vez**: fazer o login Google no OpenCode, num terminal
+interativo.
+
+```powershell
+$env:OPENCODE_CONFIG = "$HOME\.config\opencode\keys\gateway.json"; opencode
+```
+
+A partir daí a squad lê o token salvo pelo plugin
+(`~/.config/opencode/.opencode/keycloak-token.json`) e o renova sozinha pelo
+refresh token, sob o mesmo lock do plugin. O `Authorization` é trocado a cada
+request, então um nó longo não fica com token vencido. Quando o refresh token
+também expira, a execução falha **antes** de gastar o nó, com a instrução de
+login. No `.env`:
 
 ```
+LLM_PROVEDOR=gateway
+MODEL=openai/gateway
+OPENCODE_RUN_MODEL=          # vazio = gateway/gateway
+```
+
+Nenhum segredo vai para o `.env`. Os caminhos e URLs têm padrão e podem ser
+trocados por `GATEWAY_BASE_URL`, `GATEWAY_TOKEN_FILE`,
+`GATEWAY_OPENCODE_PLUGIN`, `KEYCLOAK_ISSUER` e `KEYCLOAK_CLIENT_ID`.
+
+### OpenCode Zen (`LLM_PROVEDOR=zen`)
+
+O [OpenCode Zen](https://opencode.ai/docs/zen) é o provedor pago, via API
+compatível com OpenAI (`https://opencode.ai/zen/v1`), e fica como plano B. O
+rollback é trocar `LLM_PROVEDOR` e os modelos:
+
+```
+LLM_PROVEDOR=zen
 OPENCODE_API_KEY=sua-chave
 OPENCODE_BASE_URL=https://opencode.ai/zen/v1
 MODEL=openai/kimi-k2.7-code
 ```
 
-São **três** superfícies de modelo independentes, e o requisito de cada uma vem
-do que ela precisa fazer:
+Atenção ao endpoint: `/zen/go/v1` é a assinatura **Go**, que não serve modelos
+gratuitos e tem cota mensal própria; os gratuitos só existem em `/zen/v1`.
+
+### As três superfícies de modelo
+
+O requisito de cada uma vem do que ela precisa fazer, com qualquer provedor:
 
 | Variável | Quem usa | Precisa de tool calling? |
 |---|---|---|
@@ -413,18 +459,15 @@ do que ela precisa fazer:
 | `MODEL_FERRAMENTAS` | QA que escreve os testes | **sim** |
 | `OPENCODE_RUN_MODEL` | OpenCode CLI no desenvolvimento | **sim** |
 
-Para experimentar o fluxo gastando pouco, ponha um gratuito em `MODEL`
+No Zen, para experimentar o fluxo gastando pouco, ponha um gratuito em `MODEL`
 (`openai/laguna-s-2.1-free`, `openai/deepseek-v4-flash-free`,
 `openai/mimo-v2.5-free`) e mantenha as duas superfícies que escrevem em disco
 num modelo com tool calling. Gratuito que não sustenta ferramenta não falha
 alto: ele devolve o código como markdown na resposta e o nó conclui com o
 workspace vazio (item 12 do RESILIENCIA.md).
 
-Atenção ao endpoint: `/zen/go/v1` é a assinatura **Go**, que não serve modelos
-gratuitos e tem cota mensal própria; os gratuitos só existem em `/zen/v1`.
-
 Todos os agentes compartilham o mesmo LLM por padrão (`src/squad/llm.py`),
 mas você pode passar modelos diferentes por agente — ex.: um modelo de código
 (`openai/gpt-5.1-codex`) para os devs e um mais barato para triagem — chamando
-`zen_llm("openai/<modelo>")` no `build_agent`. Os nós do LangGraph em si são
+`squad_llm("openai/<modelo>")` no `build_agent`. Os nós do LangGraph em si são
 determinísticos e não consomem tokens; só as crews usam o LLM.
