@@ -1205,6 +1205,47 @@ no perfil Next.js).
 
 ---
 
+## 36. O vermelho que era do teste, e o guard que culpou o executor
+
+**Sintoma:** thread `33c19d49` (calculadora de juros, Next.js, provedor
+gateway corporativo). 61 de 62 testes verdes; o vermelho vinha de um teste do QA que
+exigia 2 casas decimais com tolerância de `1e-6` num montante da ordem de
+10^10, onde o próprio ponto flutuante já erra mais que isso. O código estava
+certo (`Math.round(v * 100) / 100`). A rodada de correção não mudou um byte, e
+o guard de correção (item 32) encerrou a execução com "o executor recebeu o
+feedback e não o acionou".
+
+**Causa raiz:** o guard partia de uma premissa que só vale em parte: correção
+sem mudança significa executor que ignorou o feedback. Aqui o executor fez a
+coisa certa — não havia o que corrigir no código, e ele é proibido de tocar na
+suíte. Faltava uma rota: teste vermelho **sempre** voltava ao desenvolvimento,
+e só a cobertura baixa devolvia a suíte ao QA. Um teste errado não tinha para
+onde ir.
+
+**Solução:** rodada de correção sem mudança, vinda de teste vermelho **por
+asserção** (o teste rodou, comparou e discordou), passa a devolver a suíte ao
+QA uma vez, com a falha real e o aviso de que o desenvolvedor manteve o código
+([`guards.destino_da_correcao_inerte`](../src/squad/dominio/guards.py)). O QA
+corrige o teste se estiver errado e é proibido de enfraquecer critério de
+aceite. Se o impasse persistir depois disso (`MAX_REVISOES_SUITE = 1`), o gate
+humano decide, com o diagnóstico — dois agentes discordando não se resolvem
+com mais uma rodada. Vermelho de import, sintaxe, tipo ou build, ou correção
+pedida por outra origem, mantém o erro de antes: nesses não há teste para
+revisar.
+
+Na retomada da mesma thread: a rodada de desenvolvimento de novo não mudou
+nada, a suíte foi ao QA, ele corrigiu a tolerância, e os testes ficaram verdes
+(62/62, cobertura 85,5%) com revisão aprovada. A execução seguiu até a
+verificação visual — que achou outro problema, e essa é outra história.
+
+**Princípio:** **um guard que atribui culpa precisa distinguir quem pode estar
+errado.** "Nada mudou" é um fato; "o executor falhou" é uma interpretação, e
+ela só vale quando o executor era o único que podia agir. Quando o veredito vem
+de um artefato de outro agente, a rota de volta tem de passar por ele antes de
+desistir — com teto, para a discordância não virar laço.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```
