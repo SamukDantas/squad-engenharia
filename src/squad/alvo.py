@@ -10,6 +10,7 @@ também roda em container. É o mesmo princípio do `--network none` do sandbox,
 aplicado à fronteira externa em vez de a toda a rede — aqui o alvo *precisa*
 estar alcançável, então a rede existe e o que não existe é a saída.
 """
+import hashlib
 import json
 import os
 import shlex
@@ -145,6 +146,22 @@ def subir(workspace: str, rede: str, nome_alvo: str, perfil, run: dict) -> None:
         raise RuntimeError(f"Falha ao subir o alvo: {r.stderr.strip()}")
 
 
+def morreu(nome_alvo: str) -> bool:
+    """O container do alvo saiu em vez de continuar servindo.
+
+    Distingue os dois desfechos que o pipeline confundia: a entrega que **não
+    inicia** e a verificação que falhou por outro motivo. São consertos
+    diferentes e destinatários diferentes — o primeiro é do dev, com o log de
+    boot na mão; o segundo é da squad.
+
+    Estado do Docker, não heurística sobre texto de erro: `Running=false` é fato.
+    """
+    r = docker("inspect", "-f", "{{.State.Running}}", nome_alvo)
+    if r.returncode != 0:
+        return True  # sumiu: também não está servindo
+    return r.stdout.strip().lower() != "true"
+
+
 def logs(nome_alvo: str, limite: int = 2_000) -> str:
     """Saída do container do alvo — é o que explica um alvo que não sobe."""
     try:
@@ -152,3 +169,33 @@ def logs(nome_alvo: str, limite: int = 2_000) -> str:
     except (subprocess.SubprocessError, OSError):
         return ""
     return ((r.stdout or "") + "\n" + (r.stderr or "")).strip()[-limite:]
+
+
+# Um label de DNS tem no máximo 63 caracteres, e o nome do container VIRA o
+# hostname dele na rede do Docker. Estourar não dá erro na criação: o container
+# sobe normalmente e simplesmente não é resolvível, então o sintoma aparece do
+# outro lado, como "o alvo não respondeu" — que se lê como entrega que não sobe.
+LIMITE_HOSTNAME = 63
+
+# Deixa folga para a porta e para o prefixo de quem chama.
+_SUFIXO_HASH = 6
+
+
+def nome_de_rede(prefixo: str, thread_id: str) -> str:
+    """Nome de container/rede que cabe num label de DNS.
+
+    Medido numa execução real, e por um caractere: com o `thread_id` de ramo
+    (`<uuid>--<servico>`), `alvo-visual-<uuid>--ticket-service` deu 64 chars e o
+    alvo ficou irresolvível, enquanto `--room-service`, com 62, funcionou. Uma
+    diferença de uma letra no nome do serviço decidia se o nó funcionava.
+
+    Quando não cabe, o id é substituído por um prefixo legível mais um hash do
+    valor inteiro: encurtar por truncamento simples juntaria dois ramos cujo id
+    só difere no fim, que é exatamente o caso de `<uuid>--<servico>`.
+    """
+    inteiro = f"{prefixo}-{thread_id}"
+    if len(inteiro) <= LIMITE_HOSTNAME:
+        return inteiro
+    digest = hashlib.sha256(thread_id.encode("utf-8")).hexdigest()[:_SUFIXO_HASH]
+    espaco = LIMITE_HOSTNAME - len(prefixo) - 1 - _SUFIXO_HASH - 1
+    return f"{prefixo}-{thread_id[:max(espaco, 1)].rstrip('-')}-{digest}"
