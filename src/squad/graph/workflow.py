@@ -28,7 +28,7 @@ from ..crews.desenvolvimento import crew_desenvolvimento
 from ..crews.planejamento import crew_planejamento
 from ..crews.qualidade import crew_revisao, crew_testes
 from ..deploy import executar_deploy
-from ..dominio import guards, orcamento, rotas
+from ..dominio import guards, nomes, orcamento, rotas
 from ..dominio.vereditos import veredito_aprovado, veredito_sim
 from ..llm import squad_llm
 from ..adaptadores import perfis
@@ -492,6 +492,7 @@ def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
     resposta = interrupt(
         {
             "mensagem": "Autorizar deploy?",
+            "nome_repo": state.get("nome_repo", ""),
             "testes_ok": state.get("testes_ok", False),
             "cobertura": state.get("cobertura", 0.0),
             "testes_aderentes": state.get("testes_aderentes", False),
@@ -541,7 +542,10 @@ def no_deploy(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
 
     with medir(thread_id, "deploy") as m:
         resultado = executar_deploy(
-            state["workspace"], thread_id, state["pedido"], perfil
+            state["workspace"], thread_id, state["pedido"], perfil,
+            # Thread anterior a esta mudança não tem nome gravado: a regra
+            # curta vale para ela também, em vez do slug do pedido inteiro.
+            nome=state.get("nome_repo") or nomes.nome_do_pedido(state["pedido"]),
         )
         m.update(deploy_ref=resultado.get("deploy_ref", ""))
     return resultado
@@ -580,7 +584,40 @@ def no_validacao_spec(state: EstadoProjeto, config: RunnableConfig) -> EstadoPro
         m.update(spec_coerente=coerente, resposta_guard=_resposta_curta(veredito))
     if not coerente:
         print(f">>> Guard: spec reprovada (não adere ao pedido). Veredito: {str(veredito)[:40]}")
-    return {"spec_coerente": coerente}
+        return {"spec_coerente": coerente}
+    # Ramo do maestro já tem nome (o do serviço), e retomada não renomeia.
+    if state.get("servico") or state.get("nome_repo"):
+        return {"spec_coerente": coerente}
+    return {"spec_coerente": coerente, "nome_repo": _nome_repo(state)}
+
+
+def _nome_repo(state: EstadoProjeto) -> str:
+    """Nome curto do repositório, decidido uma vez e gravado no estado.
+
+    Aqui e não no deploy: o deploy é determinístico e sem LLM, e o nome
+    precisa estar pronto antes do gate para o humano ver para onde está
+    autorizando a publicação. Gravado no checkpoint, retomar a thread publica
+    no mesmo repositório em vez de sortear outro nome. Uma chamada barata; se
+    ela falhar ou vier fora do formato, a regra determinística assume — nome
+    de repositório não é motivo para derrubar a execução.
+    """
+    try:
+        resposta = com_retry("nome do repositório", lambda: squad_llm().call(
+            "Dê um nome curto para o repositório do projeto descrito abaixo: 2 a "
+            "3 palavras em português, minúsculas, sem acento, separadas por "
+            "hífen, dizendo O QUE o sistema é — não o verbo do pedido nem a "
+            "linguagem. Responda APENAS com o nome. Exemplos: "
+            "conversor-temperatura, api-reserva-salas, dashboard-funil-vendas.\n\n"
+            f"Pedido:\n{state['pedido'][:2000]}"
+        ))
+    except Exception as e:  # noqa: BLE001 — qualquer falha cai no fallback
+        print(f">>> Nome do repositório: chamada falhou ({type(e).__name__}); usando regra.")
+        resposta = ""
+    nome = nomes.nome_da_resposta(resposta)
+    if not nome:
+        nome = nomes.nome_do_pedido(state["pedido"]) or f"entrega-{state['thread_id'][:8]}"
+    print(f">>> Nome do repositório: {nome}")
+    return nome
 
 
 def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:

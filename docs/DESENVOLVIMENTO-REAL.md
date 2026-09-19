@@ -55,7 +55,7 @@ build de container), atrás do mesmo gate humano.
 
 *Desenho implementado:* o workspace vira repositório git próprio; a entrega
 é commitada (com `.gitignore` para caches de execução) e publicada num
-repositório **do projeto**, `<DEPLOY_OWNER>/<slug do pedido>`, criado via `gh`
+repositório **do projeto**, `<DEPLOY_OWNER>/<nome curto>`, criado via `gh`
 se ainda não existir. Sem `DEPLOY_OWNER`, degrada para commit local com aviso.
 Falha de git ou gh (exit != 0 ou timeout) levanta erro explícito — o checkpoint
 preserva o progresso e `--thread` retoma reexecutando só o deploy.
