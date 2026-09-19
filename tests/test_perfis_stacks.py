@@ -216,11 +216,14 @@ def test_config_fica_fora_da_entrega(tmp_path):
 
 # ---------- passo de build: existe onde há compilação ----------
 
-def test_so_o_nextjs_tem_passo_de_build():
-    """Python não compila; no Java o `mvn test` já compila antes de testar, e um
-    passo separado só dobraria o custo do container."""
-    com_build = [n for n in perfis.nomes() if perfis.obter(n).comando_build]
-    assert com_build == ["nextjs"]
+def test_stack_compilada_tem_passo_de_build():
+    """Python não compila, e é a única. Java entrou na lista quando Spring virou
+    obrigatório: `mvn test` compila sozinho, mas uma falha de compilação e um
+    contexto que não sobe chegariam ao dev no mesmo bloco de saída, com o erro
+    real enterrado numa stack trace do Spring."""
+    com_build = sorted(n for n in perfis.nomes() if perfis.obter(n).comando_build)
+    assert com_build == ["java", "nextjs"]
+    assert not perfis.obter("python").comando_build
 
 
 def test_build_do_nextjs_invoca_o_next_por_caminho_absoluto():
