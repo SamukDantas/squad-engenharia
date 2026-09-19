@@ -1,0 +1,72 @@
+# Grafo de Execução — Squad Engenharia
+# Mapa Mermaid: ramos, gates, gates e tetos
+# Fonte da verdade: src/squad/graph/workflow.py (construir_subgrafo_servico)
+#                    src/squad/graph/maestro.py (construir_maestro)
+#                    src/squad/dominio/rotas.py (tetos e decisões)
+
+flowchart TD
+    subgraph MAESTRO["Maestro — orquestra o fan-out de serviços"]
+        direction TB
+        M_START(("START"))
+        M_decomposicao["decomposicao"]
+        M_contratos["contratos"]
+        M_fan_out_service{{"fan_out_servicos"}}
+        M_ramo["ramo (por serviço)"]
+        M_integracao["integracao"]
+        M_gate{"gate"}
+        M_fan_out_deploy{{"fan_out_deploy"}}
+        M_deploy["deploy_servico"]
+        M_END(("END"))
+
+        M_START --> M_decomposicao
+        M_decomposicao --> M_contratos
+        M_contratos --> M_fan_out_service
+        M_fan_out_service --> M_ramo
+        M_ramo --> M_integracao
+        M_integracao --> M_gate
+        M_gate -- "placar ok / aprovado" --> M_fan_out_deploy
+        M_gate -- "placar reprovado" --> M_END
+        M_fan_out_deploy --> M_deploy
+        M_deploy --> M_END
+    end
+
+    subgraph RAMO["Ramo — pipeline de um serviço"]
+        direction TB
+        R_start(("START"))
+        R_triagem["triagem"]
+        R_planejamento["planejamento"]
+        R_validacao_spec["validacao_spec"]
+        R_desenvolvimento["desenvolvimento"]
+        R_escrever_testes["escrever_testes"]
+        R_validacao_testes["validacao_testes"]
+        R_executar_testes["executar_testes"]
+        R_config_ambientes["config_ambientes"]
+        R_revisao["revisao"]
+        R_pentest["pentest"]
+        R_visual["visual"]
+        R_aprovacao_humana("aprovacao_humana")
+        R_end(("END"))
+
+        R_start --> R_triagem
+        R_triagem --> R_planejamento
+        R_planejamento --> R_validacao_spec
+
+        R_validacao_spec -- "spec coerente" --> R_desenvolvimento
+        R_validacao_spec -- "tetô planejamento (2)" --> R_planejamento
+
+        R_desenvolvimento --> R_escrever_testes
+
+        R_escrever_testes --> R_validacao_testes
+
+        R_validacao_testes -- "testes aderentes" --> R_executar_testes
+        R_validacao_testes -- "tetô testes (2)" --> R_escrever_testes
+
+        R_executar_testes -- "testes ok" --> R_config_ambientes
+        R_executar_testes -- "tetô correção (3)" --> R_desenvolvimento
+
+        R_config_ambientes --> R_revisao
+        R_revisao --> R_pentest
+        R_pentest --> R_visual
+        R_visual --> R_aprovacao_humana
+        R_aprovacao_humana --> R_end
+    end
