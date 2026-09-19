@@ -32,6 +32,16 @@ def _carregar(thread_id: str) -> list[dict]:
         return []
 
 
+def eventos(thread_id: str) -> list[dict]:
+    """O histórico da execução, para quem precisa relê-lo.
+
+    Público porque a retomada depende dele: `main.py` descobre aqui se a thread
+    nasceu paralela, em vez de exigir que quem retoma lembre da flag — um
+    esquecimento viraria uma execução que parece corrompida.
+    """
+    return _carregar(thread_id)
+
+
 def registrar(thread_id: str, evento: str, **dados) -> None:
     """Acrescenta um evento ao histórico da execução."""
     eventos = _carregar(thread_id)

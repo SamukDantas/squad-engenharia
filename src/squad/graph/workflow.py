@@ -32,6 +32,7 @@ from ..dominio import guards, orcamento, rotas
 from ..dominio.vereditos import veredito_aprovado, veredito_sim
 from ..llm import zen_llm
 from ..adaptadores import perfis
+from ..adaptadores.config_spring import medir_ambientes
 from ..adaptadores.metricas_json import medir, registrar
 from ..adaptadores.opencode_cli import executar_opencode
 from ..pentest import executar_pentest, habilitado as pentest_habilitado
@@ -52,6 +53,7 @@ MAX_TESTES = rotas.MAX_TESTES
 MAX_REVISOES = rotas.MAX_REVISOES
 MAX_PENTEST = rotas.MAX_PENTEST
 MAX_VISUAL = rotas.MAX_VISUAL
+MAX_AMBIENTES = rotas.MAX_AMBIENTES
 
 LIMITE_DUMP_CODIGO = 15_000   # chars de código injetados na tarefa do revisor
 LIMITE_AMOSTRA_TESTES = 20_000  # chars da suíte mostrados ao guard de critérios
@@ -75,8 +77,24 @@ def _cobertura_minima_modulo() -> float:
     return _piso("COBERTURA_MINIMA_MODULO", 60.0)
 
 
-def _tid(config: RunnableConfig) -> str:
+def _tid_da_execucao(config: RunnableConfig) -> str:
+    """A thread que o LangGraph está executando."""
     return str(config["configurable"]["thread_id"])
+
+
+def _tid(state: EstadoProjeto, config: RunnableConfig) -> str:
+    """A thread **deste ramo**, e não a do grafo que o executa.
+
+    Dentro de um subgrafo o `config` carrega o `thread_id` do pai. Como o id
+    batiza o workspace, os nomes de container e o arquivo de métricas, ler dali
+    faria dois serviços construídos em paralelo escreverem no mesmo lugar — e o
+    sintoma seria um container recusado por nome duplicado, longe da causa.
+
+    `no_triagem` estabelece o valor e o guarda no estado; todo nó depois dele lê
+    daqui. É a mesma razão pela qual `_perfil` e `_registrar_teto` já liam do
+    estado.
+    """
+    return str(state.get("thread_id") or _tid_da_execucao(config))
 
 
 def _do_perfil(perfil) -> dict:
@@ -250,7 +268,13 @@ def no_triagem(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     A stack é resolvida aqui de propósito: nome inválido reprova em 1s, na
     triagem, e não lá no sandbox com uma imagem inexistente depois de o
     planejamento já ter sido pago."""
-    thread_id = _tid(config)
+    # Um ramo por serviço: o id da thread carrega o nome do serviço para que
+    # workspace, containers e métricas de dois ramos paralelos não se cruzem.
+    # Sem `servico` no estado — execução de entrega única — o id é o da própria
+    # thread, exatamente como sempre foi.
+    servico = str(state.get("servico") or "").strip()
+    base = _tid_da_execucao(config)
+    thread_id = f"{base}--{servico}" if servico else base
     with medir(thread_id, "triagem"):
         pedido = (state.get("pedido") or "").strip()
         if not pedido:
@@ -276,7 +300,7 @@ def no_triagem(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
 def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """Veredito por execução: roda a suíte na jaula (sandbox Docker por
     padrão) e traduz o resultado em estado. Sem LLM."""
-    thread_id = _tid(config)
+    thread_id = _tid(state, config)
     perfil = _perfil(state)
     with medir(
         thread_id, "executar_testes",
@@ -354,7 +378,7 @@ def no_pentest(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     do laço barato: é o nó de execução mais caro. Desligado por padrão
     (PENTEST_HABILITADO), curto-circuita com veredito verde para não mudar o
     comportamento de quem ainda não construiu as imagens."""
-    thread_id = _tid(config)
+    thread_id = _tid(state, config)
     if not pentest_habilitado():
         print(">>> Pentest desligado (PENTEST_HABILITADO=0) — pulando.")
         return {"pentest_ok": True, "vulnerabilidades": []}
@@ -391,7 +415,7 @@ def no_visual(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     é execução cara e não pertence ao laço barato. Desligado por padrão
     (VISUAL_HABILITADO), curto-circuita verde para não mudar o comportamento de
     quem ainda não construiu a imagem."""
-    thread_id = _tid(config)
+    thread_id = _tid(state, config)
     perfil = _perfil(state)
     if not visual_habilitado():
         print(">>> Verificação visual desligada (VISUAL_HABILITADO=0) — pulando.")
@@ -412,6 +436,43 @@ def no_visual(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
         "visual_tentativas": state.get("visual_tentativas", 0) + (0 if aprovado else 1),
         "origem_feedback": "" if aprovado else "visual",
         "feedback_qa": "" if aprovado else resultado["feedback_visual"],
+    }
+
+
+def no_config_ambientes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
+    """Quarta camada de veredito por medição — e a mais barata das quatro.
+
+    Os testes rodam no perfil `test`, com H2 em memória, e ficam verdes
+    independentemente do que os perfis de homologação e produção digam. Uma
+    entrega pode passar em tudo e trazer `ddl-auto: create-drop` em produção,
+    que apaga o banco no boot, ou a senha do banco escrita no YAML, que vai para
+    o repositório junto com o código. Nenhum dos dois aparece numa suíte verde,
+    e nenhum é o tipo de coisa que se quer descobrir depois do push.
+
+    Espelha o pentest e o visual: o nó existe sempre no grafo e curto-circuita
+    verde quando a stack não exige configuração por ambiente. A diferença é que
+    aqui quem decide é o perfil, não uma variável de ambiente — a exigência
+    nasce do Spring, não de quem construiu qual imagem.
+    """
+    perfil = _perfil(state)
+    if not perfil.exige_ambientes:
+        return {"ambientes_ok": True, "achados_ambientes": []}
+
+    with medir(_tid(state, config), "config_ambientes", stack=perfil.nome) as m:
+        resultado = medir_ambientes(state["workspace"])
+        m.update(
+            ambientes_ok=resultado["ambientes_ok"],
+            achados=len(resultado["achados_ambientes"]),
+            arquivos=len(resultado["arquivos_config"]),
+        )
+
+    aprovado = resultado["ambientes_ok"]
+    return {
+        "ambientes_ok": aprovado,
+        "achados_ambientes": resultado["achados_ambientes"],
+        "ambientes_tentativas": state.get("ambientes_tentativas", 0) + (0 if aprovado else 1),
+        "origem_feedback": "" if aprovado else "ambientes",
+        "feedback_qa": "" if aprovado else resultado["feedback_ambientes"],
     }
 
 
@@ -437,6 +498,8 @@ def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
             "pentest_ok": state.get("pentest_ok", False),
             "vulnerabilidades": len(vulns),
             "visual_ok": state.get("visual_ok", False),
+            "ambientes_ok": state.get("ambientes_ok", True),
+            "achados_ambientes": len(state.get("achados_ambientes") or []),
             "problemas_visuais": len(state.get("problemas_visuais") or []),
             "relatorio_qa": state.get("relatorio_qa", ""),
         }
@@ -459,7 +522,7 @@ def no_deploy(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     Roda contra o disco, não contra estado guardado: uma thread retomada dias
     depois precisa provar de novo que compila.
     """
-    thread_id = _tid(config)
+    thread_id = _tid(state, config)
     perfil = _perfil(state)
 
     with medir(thread_id, "verificacao_deploy", stack=perfil.nome) as m:
@@ -487,7 +550,7 @@ def no_deploy(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
 # ---------- nós que invocam crews ----------
 
 def no_planejamento(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
-    with medir(_tid(config), "planejamento"):
+    with medir(_tid(state, config), "planejamento"):
         resultado = com_retry(
             "planejamento",
             lambda: crew_planejamento().kickoff(
@@ -505,7 +568,7 @@ def no_validacao_spec(state: EstadoProjeto, config: RunnableConfig) -> EstadoPro
     """Guard de aderência: uma chamada única e barata que confere se a spec
     produzida trata mesmo do pedido, antes de gastar tokens com desenvolvimento.
     Protege contra alucinação da crew de planejamento (spec de outro tema)."""
-    with medir(_tid(config), "validacao_spec") as m:
+    with medir(_tid(state, config), "validacao_spec") as m:
         m.update(chars_contexto=len(state["pedido"]) + len(state["spec"][:8000]))
         veredito = com_retry("guard de aderência", lambda: zen_llm().call(
             "Você é um verificador rigoroso. Responda APENAS com a palavra SIM ou "
@@ -535,7 +598,7 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         _impressao_entrega(state["workspace"], perfil) if origem != "inicial" else None
     )
     with medir(
-        _tid(config), "desenvolvimento", executor=executor, origem=origem
+        _tid(state, config), "desenvolvimento", executor=executor, origem=origem
     ) as m:
         m.update(chars_contexto=len(state["spec"]) + len(feedback))
         if executor == "opencode":
@@ -574,7 +637,7 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
 def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     perfil = _perfil(state)
     arquivos_antes = "\n".join(state.get("arquivos", []))
-    with medir(_tid(config), "escrever_testes") as m:
+    with medir(_tid(state, config), "escrever_testes") as m:
         m.update(chars_contexto=(
             len(state["spec"])
             + len(arquivos_antes)
@@ -610,7 +673,7 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
         print(">>> Guard de critérios: nenhum arquivo de teste encontrado.")
         return {"testes_aderentes": False}
 
-    with medir(_tid(config), "validacao_testes") as m:
+    with medir(_tid(state, config), "validacao_testes") as m:
         m.update(chars_contexto=len(state["spec"][:6000]) + len(testes))
         veredito = com_retry("guard de critérios", lambda: zen_llm().call(
             "Você é um verificador rigoroso de testes. Responda APENAS com a "
@@ -647,7 +710,7 @@ def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """
     # Ainda é o relatório da rodada anterior: este nó só o sobrescreve ao retornar.
     anterior = (state.get("relatorio_qa") or "")[:LIMITE_REVISAO_ANTERIOR]
-    with medir(_tid(config), "revisao") as m:
+    with medir(_tid(state, config), "revisao") as m:
         m.update(chars_contexto=(
             len(state["codigo"])
             + len(state["spec"])
@@ -744,9 +807,50 @@ def rota_pos_visual(state: EstadoProjeto) -> str:
     return _aplicar(state, rotas.pos_visual(state))
 
 
+def rota_pos_config_ambientes(state: EstadoProjeto) -> str:
+    return _aplicar(state, rotas.pos_config_ambientes(state))
+
+
+def no_veredito_do_ramo(state: EstadoProjeto) -> EstadoProjeto:
+    """Fim do ramo: fecha o veredito e devolve o controle a quem o chamou.
+
+    Registrado sob o nome `aprovacao_humana` de propósito. É para lá que as
+    rotas do domínio mandam quando o ramo acaba — por convergência ou por teto
+    de circuit breaker — e mudar o nome obrigaria a mexer em `dominio/rotas.py`,
+    que é justamente o que a extração do subgrafo não deve exigir. O gate
+    humano de verdade está no maestro, uma camada acima, e vê os N ramos de uma
+    vez.
+
+    `pronto` separa dois desfechos que hoje se confundiriam num booleano só:
+    o ramo que convergiu e o que parou por orçamento. Só o primeiro é
+    publicável, e é essa distinção que permite publicar os serviços verdes e
+    reter o vermelho.
+    """
+    pronto = bool(
+        state.get("testes_ok")
+        and state.get("cobertura_ok")
+        and state.get("aprovado")
+        and state.get("pentest_ok", True)
+        and state.get("visual_ok", True)
+    )
+    servico = state.get("servico") or "entrega"
+    print(f">>> Ramo '{servico}': {'pronto para publicar' if pronto else 'RETIDO'}.")
+    return {"pronto": pronto}
+
+
 # ---------- montagem do grafo ----------
 
-def construir_grafo():
+def construir_subgrafo_servico():
+    """O pipeline de um serviço, do pedido ao veredito.
+
+    É o grafo que sempre existiu, menos as duas pontas que deixaram de ser dele:
+    o gate humano e o deploy subiram para o maestro. A razão é o paralelismo —
+    com N serviços, N gates fariam o humano aprovar um serviço antes de saber
+    que outro reprovou, e N deploys precisam esperar essa decisão única.
+
+    Sem checkpointer próprio: quem o compõe passa o dele, e é isso que faz o
+    checkpoint do pai guardar o progresso de cada ramo separadamente.
+    """
     g = StateGraph(EstadoProjeto)
 
     g.add_node("triagem", no_triagem)
@@ -756,11 +860,12 @@ def construir_grafo():
     g.add_node("escrever_testes", no_escrever_testes)
     g.add_node("validacao_testes", no_validacao_testes)
     g.add_node("executar_testes", no_executar_testes)
+    g.add_node("config_ambientes", no_config_ambientes)
     g.add_node("revisao", no_revisao)
     g.add_node("pentest", no_pentest)
     g.add_node("visual", no_visual)
-    g.add_node("aprovacao_humana", no_aprovacao_humana)
-    g.add_node("deploy", no_deploy)
+    # Nome de rota, não de comportamento: ver `no_veredito_do_ramo`.
+    g.add_node("aprovacao_humana", no_veredito_do_ramo)
 
     g.add_edge(START, "triagem")
     g.add_edge("triagem", "planejamento")
@@ -770,15 +875,48 @@ def construir_grafo():
     g.add_edge("escrever_testes", "validacao_testes")
     g.add_conditional_edges("validacao_testes", rota_pos_validacao_testes)
     g.add_conditional_edges("executar_testes", rota_pos_testes)
+    g.add_conditional_edges("config_ambientes", rota_pos_config_ambientes)
     g.add_conditional_edges("revisao", rota_pos_revisao)
     g.add_conditional_edges("pentest", rota_pos_pentest)
     g.add_conditional_edges("visual", rota_pos_visual)
+    g.add_edge("aprovacao_humana", END)
+
+    return g.compile()
+
+
+def _checkpointer():
+    """Checkpointer persistente: sobrevive a quedas do processo, permitindo
+    retomar do último nó concluído (ex.: falha 503 do provedor).
+
+    WAL e `busy_timeout` não são afinação: com ramos paralelos, dois nós
+    concluem ao mesmo tempo e o SQLite em modo padrão recusa a segunda escrita
+    com `database is locked` — matando um ramo por uma disputa de arquivo, não
+    por mérito da entrega.
+    """
+    if SqliteSaver is None:
+        return MemorySaver()
+    conn = sqlite3.connect("checkpoints.sqlite", check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    return SqliteSaver(conn)
+
+
+def construir_grafo():
+    """O maestro: o que é da execução inteira, não de um serviço.
+
+    Hoje ele conduz um ramo só, e o resultado é igual ao de sempre. A forma é
+    que mudou: gate e deploy passaram a viver aqui, onde adiante vão ver os N
+    serviços de uma vez.
+    """
+    g = StateGraph(EstadoProjeto)
+
+    g.add_node("servico", construir_subgrafo_servico())
+    g.add_node("aprovacao_humana", no_aprovacao_humana)
+    g.add_node("deploy", no_deploy)
+
+    g.add_edge(START, "servico")
+    g.add_edge("servico", "aprovacao_humana")
     g.add_edge("aprovacao_humana", "deploy")
     g.add_edge("deploy", END)
 
-    # Checkpointer persistente: sobrevive a quedas do processo, permitindo
-    # retomar a execução do último nó concluído (ex.: falha 503 do provedor).
-    if SqliteSaver is not None:
-        conn = sqlite3.connect("checkpoints.sqlite", check_same_thread=False)
-        return g.compile(checkpointer=SqliteSaver(conn))
-    return g.compile(checkpointer=MemorySaver())
+    return g.compile(checkpointer=_checkpointer())
