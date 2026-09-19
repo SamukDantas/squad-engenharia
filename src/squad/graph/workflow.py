@@ -30,7 +30,7 @@ from ..crews.qualidade import crew_revisao, crew_testes
 from ..deploy import executar_deploy
 from ..dominio import guards, orcamento, rotas
 from ..dominio.vereditos import veredito_aprovado, veredito_sim
-from ..llm import zen_llm
+from ..llm import squad_llm
 from ..adaptadores import perfis
 from ..adaptadores.config_spring import medir_ambientes
 from ..adaptadores.metricas_json import medir, registrar
@@ -570,7 +570,7 @@ def no_validacao_spec(state: EstadoProjeto, config: RunnableConfig) -> EstadoPro
     Protege contra alucinação da crew de planejamento (spec de outro tema)."""
     with medir(_tid(state, config), "validacao_spec") as m:
         m.update(chars_contexto=len(state["pedido"]) + len(state["spec"][:8000]))
-        veredito = com_retry("guard de aderência", lambda: zen_llm().call(
+        veredito = com_retry("guard de aderência", lambda: squad_llm().call(
             "Você é um verificador rigoroso. Responda APENAS com a palavra SIM ou "
             f'NAO. A especificação técnica abaixo trata do pedido "{state["pedido"]}"'
             " — mesmo assunto e mesmo escopo, sem substituí-lo por outro tema?\n\n"
@@ -675,7 +675,7 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
 
     with medir(_tid(state, config), "validacao_testes") as m:
         m.update(chars_contexto=len(state["spec"][:6000]) + len(testes))
-        veredito = com_retry("guard de critérios", lambda: zen_llm().call(
+        veredito = com_retry("guard de critérios", lambda: squad_llm().call(
             "Você é um verificador rigoroso de testes. Responda APENAS com a "
             "palavra SIM ou NAO. Os testes abaixo verificam de fato os "
             "critérios de aceite da especificação — cobrindo o comportamento "

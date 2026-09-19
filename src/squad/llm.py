@@ -1,14 +1,33 @@
-"""LLM único da squad, servido pelo OpenCode Zen (API compatível com OpenAI).
+"""LLM único da squad, servido pelo provedor escolhido em `LLM_PROVEDOR`.
 
-O CrewAI usa LiteLLM por baixo; o prefixo "openai/" indica endpoint
-OpenAI-compatível com base_url customizada.
+- `gateway` (padrão): gateway de IA on-premise cedido por um cliente, com API
+  compatível com OpenAI e autenticação por token Keycloak renovado a cada
+  request (`adaptadores/keycloak_token.py`).
+- `zen`: OpenCode Zen, pago, com chave fixa (`OPENCODE_API_KEY`). Fica como
+  plano B — o gateway corporativo é ambiente lab.
+
+O prefixo "openai/" no modelo faz o CrewAI usar o provedor nativo da OpenAI
+com base_url customizada.
 """
 import os
 import uuid
 
+import httpx
 from crewai import LLM
+from crewai.llms.hooks.base import BaseInterceptor
+
+from .adaptadores.keycloak_token import token_valido
 
 ZEN_BASE_URL = "https://opencode.ai/zen/v1"
+GATEWAY_BASE_URL = "https://ai-gateway.example.com/v1"
+PROVEDORES = ("gateway", "zen")
+
+
+def provedor() -> str:
+    valor = (os.getenv("LLM_PROVEDOR") or "gateway").strip().lower()
+    if valor not in PROVEDORES:
+        raise ValueError(f"LLM_PROVEDOR inválido: '{valor}'. Use 'gateway' ou 'zen'.")
+    return valor
 
 
 def _timeout() -> int:
@@ -38,7 +57,29 @@ def _timeout() -> int:
 _SESSAO = os.getenv("OPENCODE_SESSION") or str(uuid.uuid4())
 
 
-def zen_llm(model: str | None = None) -> LLM:
+class _KeycloakInterceptor(BaseInterceptor[httpx.Request, httpx.Response]):
+    """Troca o `Authorization` de cada request pelo token Keycloak vigente.
+
+    Header fixo na construção do LLM venceria no meio de um nó longo — uma
+    chamada pode levar ~27 min até o timeout desistir. Pedir o token por
+    request custa uma leitura de cache enquanto ele vale.
+    """
+
+    def on_outbound(self, message: httpx.Request) -> httpx.Request:
+        message.headers["Authorization"] = f"Bearer {token_valido()}"
+        return message
+
+    def on_inbound(self, message: httpx.Response) -> httpx.Response:
+        return message
+
+    async def aon_outbound(self, message: httpx.Request) -> httpx.Request:
+        return self.on_outbound(message)
+
+    async def aon_inbound(self, message: httpx.Response) -> httpx.Response:
+        return message
+
+
+def _zen(model: str | None) -> LLM:
     return LLM(
         model=model or os.getenv("MODEL", "openai/kimi-k2.7-code"),
         base_url=os.getenv("OPENCODE_BASE_URL", ZEN_BASE_URL),
@@ -52,3 +93,23 @@ def zen_llm(model: str | None = None) -> LLM:
         # OpenAI, que rejeita o parâmetro e quebra a chamada.
         timeout=_timeout(),
     )
+
+
+def _gateway(model: str | None) -> LLM:
+    return LLM(
+        model=model or os.getenv("MODEL", "openai/gateway"),
+        base_url=os.getenv("GATEWAY_BASE_URL", GATEWAY_BASE_URL),
+        # O SDK exige uma chave; quem autentica de verdade é o Bearer que o
+        # interceptor põe por cima em cada request.
+        api_key="keycloak",
+        interceptor=_KeycloakInterceptor(),
+        timeout=_timeout(),
+    )
+
+
+def squad_llm(model: str | None = None) -> LLM:
+    return _gateway(model) if provedor() == "gateway" else _zen(model)
+
+
+# Nome antigo, de quando o Zen era o único provedor.
+zen_llm = squad_llm
