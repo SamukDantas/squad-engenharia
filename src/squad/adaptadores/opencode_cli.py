@@ -29,6 +29,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+from ..llm import GATEWAY_BASE_URL, provedor
+from .keycloak_token import token_valido
+
 def _timeout() -> int:
     """Teto por rodada de desenvolvimento.
 
@@ -97,6 +100,45 @@ def _arquivo_config_global() -> Path:
     return Path(base) / "opencode" / "opencode.json"
 
 
+def _sem_jsonc(texto: str) -> str:
+    """JSONC → JSON: tira comentários e vírgulas finais, fora de strings.
+
+    O OpenCode lê o config como JSONC. A leitura estrita daqui recusava o que o
+    próprio OpenCode aceita: uma vírgula sobrando no `plugin` do config global
+    derrubava toda execução com `DEV_EXECUTOR=opencode`, dizendo que "o OpenCode
+    falharia na mesma leitura" — e ele não falhava.
+    """
+    saida: list[str] = []
+    i, n = 0, len(texto)
+    while i < n:
+        c = texto[i]
+        if c == '"':
+            j = i + 1
+            while j < n and texto[j] != '"':
+                j += 2 if texto[j] == "\\" else 1
+            saida.append(texto[i:j + 1])
+            i = j + 1
+        elif texto.startswith("//", i):
+            fim = texto.find("\n", i)
+            i = n if fim < 0 else fim
+        elif texto.startswith("/*", i):
+            fim = texto.find("*/", i + 2)
+            i = n if fim < 0 else fim + 2
+        elif c == ",":
+            j = i + 1
+            while j < n and texto[j].isspace():
+                j += 1
+            if j < n and texto[j] in "}]":
+                i += 1  # vírgula final: descarta
+            else:
+                saida.append(c)
+                i += 1
+        else:
+            saida.append(c)
+            i += 1
+    return "".join(saida)
+
+
 def _mcp_declarados() -> list[str]:
     """Nomes de MCP no config global da máquina.
 
@@ -111,7 +153,7 @@ def _mcp_declarados() -> list[str]:
     except OSError as e:
         raise RuntimeError(f"não foi possível ler {arquivo}: {e}")
     try:
-        dados = json.loads(conteudo)
+        dados = json.loads(_sem_jsonc(conteudo))
     except json.JSONDecodeError as e:
         raise RuntimeError(
             f"{arquivo} não é JSON válido ({e}). O OpenCode falharia na mesma "
@@ -152,6 +194,9 @@ def _config_escopo(workspace: str) -> str:
       talvez usar uma não se paga.
     - **permissão**: `external_directory` explícito (workspace liberado, resto
       negado) no lugar do `ask` que em headless vira auto-rejeição silenciosa.
+
+    Com `LLM_PROVEDOR=gateway` entra uma quarta: o provider do gateway e o
+    plugin Keycloak, pelo mesmo canal (`_config_gateway`).
     """
     permitidos = _mcp_permitidos()
     # União com os declarados: um servidor que apareça no global depois desta
@@ -171,7 +216,45 @@ def _config_escopo(workspace: str) -> str:
     }
     if not _skills_ligadas():
         config["agent"]["build"]["tools"] = {"skill": False}
+    if provedor() == "gateway":
+        config.update(_config_gateway())
     return json.dumps(config)
+
+
+def _plugin_keycloak() -> str:
+    bruto = (os.getenv("GATEWAY_OPENCODE_PLUGIN") or "").strip()
+    caminho = Path(bruto).expanduser() if bruto else (
+        Path.home() / ".config" / "opencode" / "keycloak-token.ts"
+    )
+    return caminho.as_posix()
+
+
+def _config_gateway() -> dict:
+    """Provedor gateway corporativo para o executor, no mesmo escopo por execução.
+
+    Espelha o `keys/gateway.json` do cliente sem depender dele: o provider
+    compatível com OpenAI e o plugin que injeta o Bearer do Keycloak em cada
+    chamada. A `apiKey` é placeholder — quem autentica é o plugin.
+    """
+    return {
+        "plugin": [_plugin_keycloak()],
+        "provider": {
+            "gateway": {
+                "npm": "@ai-sdk/openai-compatible",
+                "name": "Gateway corporativo",
+                "apiKey": "keycloak",
+                "options": {"baseURL": os.getenv("GATEWAY_BASE_URL", GATEWAY_BASE_URL)},
+                "models": {"gateway": {"name": "Gateway corporativo"}},
+            },
+        },
+    }
+
+
+def _modelo_executor() -> str:
+    modelo = (os.getenv("OPENCODE_RUN_MODEL") or "").strip()
+    if modelo:
+        return modelo
+    return "gateway/gateway" if provedor() == "gateway" else ""
 
 
 def _instrucoes(spec: str, feedback_qa: str, perfil) -> str:
@@ -222,8 +305,13 @@ def executar_opencode(workspace: str, spec: str, feedback_qa: str, perfil) -> st
         _instrucoes(spec, feedback_qa, perfil), encoding="utf-8"
     )
 
+    if provedor() == "gateway":
+        # Sem token válido, o plugin abre um navegador que ninguém vê e espera
+        # 5 min antes de desistir. Aqui a falha é imediata e diz o que fazer.
+        token_valido()
+
     comando = [binario, "run", "--dir", workspace]
-    modelo = (os.getenv("OPENCODE_RUN_MODEL") or "").strip()
+    modelo = _modelo_executor()
     if modelo:
         comando += ["-m", modelo]
     comando.append(

@@ -27,13 +27,26 @@ sequenceDiagram
     participant R as Crew Revisão (revisor LLM)
     participant PN as Pentest em sandbox isolado (rede --internal, sem egress)
     participant DP as Deploy
+    participant LP as Provedor LLM (LLM_PROVEDOR: gateway corporativo on-prem | OpenCode Zen)
+    participant KC as Keycloak do gateway corporativo (token em ~/.config/opencode)
 
     U->>G: python main.py "pedido"
     G->>WS: triagem: valida entrada e cria o workspace
     G->>CK: salva checkpoint (thread_id)
 
+    opt LLM_PROVEDOR=gateway
+        G->>KC: token_valido(): relê o arquivo e, faltando menos de 5 min, renova sob o lock compartilhado com o plugin
+        alt token válido
+            KC-->>G: access_token (cache do processo)
+        else sem token ou refresh recusado
+            KC-->>G: RuntimeError: faça o login uma vez no opencode (falha antes de gastar o nó)
+        end
+    end
+
     loop máx. 2 replanejamentos
         G->>P: kickoff(pedido)
+        P->>LP: chat/completions (Bearer renovado por request pelo interceptor)
+        LP-->>P: resposta
         P-->>G: spec técnica
         G->>CK: salva checkpoint
         G->>V: spec trata do pedido? (SIM/NAO)
@@ -47,9 +60,11 @@ sequenceDiagram
 
     loop máx. 3 tentativas de correção
         G->>D: executa(spec, feedback_qa) conforme DEV_EXECUTOR
+        D->>LP: opencode run -m gateway/gateway (plugin keycloak injeta o Bearer)
         D->>WS: escreve arquivos .py REAIS (não escreve em tests/)
         G->>WS: varre o disco: manifesto + dump do código
         G->>CK: salva checkpoint
+        Note over V,R: guards, QA e revisão usam o mesmo squad_llm() → LP<br/>com Zen: chave OPENCODE_API_KEY + header x-opencode-session
         opt rodada nascida de reprovação de revisão
             Note over G,PT: roteamento seletivo: suíte preservada —<br/>vai direto ao pytest, sem reescrever testes nem repagar o guard
         end
@@ -91,7 +106,7 @@ sequenceDiagram
     G->>U: interrupt( ) Autorizar deploy? (sim/nao)
     Note over G,CK: execução pausada e persistida —<br/>sobrevive a queda do processo
     U->>G: sim
-    G->>DP: git commit + push entrega/thread_id (nó determinístico)
+    G->>DP: git commit + push em DEPLOY_OWNER/slug (repo próprio por projeto, nó determinístico)
     DP-->>G: deploy_ok = true, deploy_ref
     G->>CK: checkpoint final
     G-->>U: Deploy ok: True + entrega publicada em deploy_ref
@@ -141,3 +156,12 @@ sequenceDiagram
    `metrics/<thread_id>.json` — incluindo a origem de cada rodada de
    desenvolvimento (inicial, testes ou revisão) —, com resumo impresso ao
    final. Sem isso não há como saber se uma mudança melhorou o resultado.
+12. **Provedor de LLM intercambiável**: `LLM_PROVEDOR` escolhe entre o
+   gateway gateway corporativo on-premise (padrão, cedido por um cliente) e o OpenCode
+   Zen, como `DEV_EXECUTOR` escolhe o executor — a governança do grafo não
+   depende de quem responde. Com o gateway corporativo a autenticação é Keycloak: login
+   interativo uma única vez no OpenCode, depois refresh automático sob o
+   mesmo lock do plugin, e o `Authorization` é trocado **por request** (um nó
+   longo não fica com token vencido). O token nunca entra no repo nem no
+   `.env`. As três superfícies de modelo (`MODEL`, `MODEL_FERRAMENTAS`,
+   `OPENCODE_RUN_MODEL`) seguem o provedor; o rollback para o Zen é uma linha.

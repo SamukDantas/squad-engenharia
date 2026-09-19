@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 from crewai import Agent, Task
 
-from ..llm import zen_llm
+from ..llm import squad_llm
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 
@@ -42,7 +42,7 @@ def build_agent(key: str, tools: list | None = None, **overrides) -> Agent:
         backstory=cfg["backstory"],
         allow_delegation=cfg.get("allow_delegation", False),
         tools=tools or [],
-        llm=zen_llm(_modelo(tools)),
+        llm=squad_llm(_modelo(tools)),
         verbose=True,
     )
 

@@ -104,6 +104,13 @@ cmd.exe (specs longas também esbarrariam no limite de tamanho de argumento).
 O executor é proibido de escrever em `tests/` — quem escreve os testes é o QA
 da squad, mantendo a separação entre quem implementa e quem valida.
 
+O provedor do executor segue o da squad (`LLM_PROVEDOR`). Com o gateway
+corporativo, o provider e o plugin Keycloak chegam ao CLI pelo mesmo
+`OPENCODE_CONFIG_CONTENT` que já fecha MCP e skills por execução — nada é
+escrito no config global da máquina. Antes de subir o CLI, a squad confere o
+token: sem ele, o plugin abriria um navegador que ninguém vê e esperaria 5
+minutos para desistir.
+
 ### Fase 6 — A jaula de execução
 Os testes deixam de rodar no host e passam a rodar em container efêmero.
 Detalhes na seção "CrewAI vs Docker", abaixo.
