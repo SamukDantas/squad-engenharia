@@ -79,7 +79,7 @@ class _KeycloakInterceptor(BaseInterceptor[httpx.Request, httpx.Response]):
         return message
 
 
-def _zen(model: str | None) -> LLM:
+def _zen(model: str | None, **teto) -> LLM:
     return LLM(
         model=model or os.getenv("MODEL", "openai/kimi-k2.7-code"),
         base_url=os.getenv("OPENCODE_BASE_URL", ZEN_BASE_URL),
@@ -91,11 +91,11 @@ def _zen(model: str | None) -> LLM:
         # mas finito, contra as 9 horas que custou sem teto nenhum.
         # `num_retries` não desliga isso: o CrewAI repassa kwargs ao SDK da
         # OpenAI, que rejeita o parâmetro e quebra a chamada.
-        timeout=_timeout(),
+        **{"timeout": _timeout(), **teto},
     )
 
 
-def _gateway(model: str | None) -> LLM:
+def _gateway(model: str | None, **teto) -> LLM:
     return LLM(
         model=model or os.getenv("MODEL", "openai/gateway"),
         base_url=os.getenv("GATEWAY_BASE_URL", GATEWAY_BASE_URL),
@@ -103,12 +103,28 @@ def _gateway(model: str | None) -> LLM:
         # interceptor põe por cima em cada request.
         api_key="keycloak",
         interceptor=_KeycloakInterceptor(),
-        timeout=_timeout(),
+        **{"timeout": _timeout(), **teto},
     )
 
 
-def squad_llm(model: str | None = None) -> LLM:
-    return _gateway(model) if provedor() == "gateway" else _zen(model)
+def squad_llm(model: str | None = None, *, acessoria: bool = False) -> LLM:
+    """LLM do provedor ativo.
+
+    `acessoria=True` é para chamada que a execução dispensa (hoje, o nome do
+    repositório): teto curto e sem as repetições internas do SDK. Com o teto
+    das chamadas que importam (300s x repetições ≈ 27 min), um gateway lento
+    poderia segurar a execução inteira por causa de um nome que a regra
+    determinística resolve de graça. Preventivo — não houve travamento medido.
+    """
+    teto = {"timeout": _timeout_acessoria(), "max_retries": 0} if acessoria else {}
+    return _gateway(model, **teto) if provedor() == "gateway" else _zen(model, **teto)
+
+
+def _timeout_acessoria() -> int:
+    try:
+        return int(os.getenv("TIMEOUT_LLM_ACESSORIA", "30"))
+    except ValueError:
+        return 30
 
 
 # Nome antigo, de quando o Zen era o único provedor.

@@ -1149,6 +1149,62 @@ da capacidade.
 
 ---
 
+## 35. O `node_modules` da entrega venceu o da jaula
+
+**Sintoma:** primeira execução em Next.js com o provedor gateway corporativo (thread
+`00b92498`, calculadora de juros). O `next build` na jaula morreu três vezes
+seguidas com `TypeError: Cannot read properties of undefined (reading
+'createClientModuleProxy')`, ao coletar os dados de `/_not-found`, uma página
+que a entrega nem escreveu. Duas rodadas de correção não mexeram na causa, a
+terceira não mudou um byte, e o guard de correção (item 32) encerrou a
+execução. Foram cerca de 85 minutos até o erro, com duas passadas do QA de
+~18 min cada.
+
+**Causa raiz:** o executor roda **no host, com rede**, e o modelo rodou
+`npm install`. O workspace ganhou um `node_modules` com next 15.5.4 e react
+19.1, e o `package.json` foi "modernizado" para essas versões. A jaula tem
+next 15.1.3 e react 18.3.1, assados em `/app/node_modules`, um nível acima de
+`/app/projeto`, justamente para o resolvedor do Node achá-los subindo a árvore.
+Só que o resolvedor para no **primeiro** `node_modules` que encontra: a cópia
+da entrega levava o dela junto, e ele vencia. O binário `next` da imagem
+(15.1.3) carregou o react 19 da entrega, e as duas versões não conversam.
+
+A instrução ao executor listava as libs permitidas, mas não as versões, e não
+proibia instalar. As execuções em Next.js de 06/09, com outro modelo,
+passaram porque aquele modelo não instalou nada. A defesa dependia de um
+comportamento do modelo, não de uma garantia da jaula.
+
+O laço de correção não tinha como resolver. O stack trace aponta para
+`.next/server/chunks/135.js` e para uma página gerada pelo framework. Não há
+linha da entrega para corrigir, e o executor, lendo o erro, não tinha como
+saber que o problema era a pasta que ele mesmo tinha criado.
+
+**Solução:** duas camadas, na ordem em que protegem
+([`perfil_nextjs.py`](../src/squad/adaptadores/perfil_nextjs.py)):
+
+- **Na jaula (garantia):** toda cópia da entrega para um container descarta o
+  `node_modules` dela. Isso vale para o build, para a suíte e para o alvo da
+  verificação visual e do pentest. O que o executor instalar no host deixa de
+  existir onde o veredito é produzido. Confirmado no próprio workspace que
+  falhou: com o `node_modules` do react 19 ainda lá, o build passou a gerar
+  `/` e `/_not-found` sem erro.
+- **No prompt (economia):** o executor recebe as versões exatas da imagem e a
+  proibição explícita de `npm install`/`yarn`/`pnpm`. Um teste confere que as
+  versões citadas batem com os dois Dockerfiles, para o prompt não envelhecer
+  calado quando a imagem mudar.
+
+**Princípio:** **a jaula decide o ambiente, e o que vem de fora é descartado,
+não negociado.** O `--network none` (item 21) garantia que nada entrasse
+**durante** a execução, mas uma dependência já pode chegar dentro da entrega.
+Isolamento que depende do executor se comportar é pedido, não isolamento. A
+mesma lógica do workspace read-only: a entrega é entrada, e o ambiente que a
+julga não pode ser editável por ela. Uma falha de ambiente disfarçada de
+falha de código é a pior classe para o laço de correção, porque ele gasta
+rodadas consertando o lugar errado (o mesmo padrão do `React is not defined`
+no perfil Next.js).
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```

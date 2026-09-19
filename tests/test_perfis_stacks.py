@@ -5,6 +5,7 @@ vitest e JaCoCo não concordam em nada além do que significa "coberto". Estes
 testes fixam os três formatos contra fixtures no schema real de cada ferramenta.
 """
 import json
+from pathlib import Path
 
 from src.squad.adaptadores import perfil_java, perfil_nextjs, perfis
 from src.squad.portas.perfil import Cobertura
@@ -48,6 +49,39 @@ def test_nextjs_invoca_o_vitest_por_caminho_absoluto():
     assert "/app/node_modules/.bin/vitest" in cmd
     assert "npx" not in cmd
     assert "--coverage.reportsDirectory=/out" in cmd
+
+
+def test_nextjs_descarta_node_modules_da_entrega_em_todo_container():
+    """Thread `00b92498`: o executor instalou react 19 no workspace, e o
+    `node_modules` da entrega venceu o da imagem na resolução do Node — o
+    `next` 15.1.3 da imagem carregou react 19 e o build morreu. Build, suíte e
+    alvo (visual/pentest) têm de usar só as dependências da imagem."""
+    perfil = perfis.obter("nextjs")
+    for cmd in (perfil.comando_build(), perfil.comando_container("/out")):
+        copia, _, resto = cmd.partition("rm -rf /app/projeto/node_modules")
+        assert "cp -r /src /app/projeto" in copia, cmd
+        assert "/app/node_modules/.bin/" in resto, cmd
+    assert perfil.preparo_alvo.startswith("rm -rf node_modules && ")
+
+
+def test_nextjs_versoes_do_prompt_batem_com_as_imagens():
+    """O executor escreve para as versões que o prompt cita; se elas saírem de
+    sincronia com as imagens, a entrega volta a mirar uma API que a jaula não
+    tem."""
+    raiz = Path(__file__).resolve().parents[1]
+    citadas = dict(item.strip().split(" ") for item in perfil_nextjs._VERSOES.split(","))
+    for dockerfile in ("Dockerfile.sandbox-nextjs", "Dockerfile.target-nextjs"):
+        texto = (raiz / dockerfile).read_text(encoding="utf-8")
+        for lib in ("next", "react", "react-dom"):
+            assert f"{lib}@{citadas[lib]}" in texto, (dockerfile, lib)
+    sandbox = (raiz / "Dockerfile.sandbox-nextjs").read_text(encoding="utf-8")
+    assert f"typescript@{citadas['typescript']}" in sandbox
+
+
+def test_nextjs_proibe_npm_install_no_prompt_do_executor():
+    instrucoes = perfis.obter("nextjs").instrucoes_executor
+    assert "NÃO rode `npm install`" in instrucoes
+    assert perfil_nextjs._VERSOES in instrucoes
 
 
 # ---------- Next.js: cobertura V8 / istanbul ----------
