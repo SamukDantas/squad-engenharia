@@ -29,6 +29,10 @@ class EstadoProjeto(TypedDict, total=False):
     origem_feedback: str # quem motivou a rodada: "testes" | "revisao" | "pentest" | ""
     aprovado: bool       # veredito do revisor
     tentativas: int      # contador do laço de correções
+    correcao_inerte: str # rodada de correção sem mudança: "" | revisar_suite | aprovacao_humana
+    revisoes_suite: int  # vezes que o QA revisou a suíte contestada pelo dev
+    falha_de_build: bool # o vermelho foi de compilação, não de teste
+    motivo_gate: str     # diagnóstico que o gate humano mostra além do placar
     revisao_tentativas: int  # contador só das reprovações de revisão
     pentest_ok: bool     # veredito de execução: nenhuma vuln >= piso de bloqueio
     vulnerabilidades: list[dict]  # achados do pentest (ferramenta, endpoint, severidade)

@@ -13,7 +13,7 @@ entrada é um manifesto, não um caminho.
 """
 from typing import Callable, Mapping
 
-from .rotas import e_teste_padrao
+from .rotas import MAX_REVISOES_SUITE, e_teste_padrao
 
 # Manifesto da entrega: caminho relativo -> o arquivo tem conteúdo?
 # "Ter conteúdo" é o critério, não "existir": um `__init__.py` de 0 bytes é
@@ -93,4 +93,89 @@ def conferir_correcao(antes: Impressao, depois: Impressao, origem: str) -> str |
         "apontamento sobre o mesmo código. Confira se o feedback chegou "
         "acionável ao executor e se o modelo suporta tool calling. O checkpoint "
         "preserva o progresso: `main.py --thread <id>` retoma."
+    )
+
+
+# ---------- correção inerte: quando o vermelho é do teste ----------
+
+# O teto (`MAX_REVISOES_SUITE`, em rotas) é uma revisão: mais que isso vira
+# dois agentes discordando em laço, e quem desempata é o humano.
+
+# Asserção que falhou: o teste rodou, comparou e discordou. É o único vermelho
+# em que o erro pode estar no próprio teste — expectativa errada, tolerância
+# rígida demais.
+_MARCAS_ASSERCAO = (
+    "AssertionError", "AssertionFailedError", "\nE       assert", "expected ",
+)
+# O teste nem chegou a comparar: import, sintaxe, tipo, coleta, nome indefinido.
+# Aqui não há o que o QA revisar — é código ou ambiente, e a rodada de correção
+# que não mexeu em nada continua sendo o erro que o guard acima descreve.
+_MARCAS_AMBIENTE = (
+    "ModuleNotFoundError", "ImportError", "Cannot find module",
+    "Failed to resolve import", "SyntaxError", "error TS", "ERROR collecting",
+    "no tests ran", "No test files found", "COMPILATION ERROR", "NameError",
+    "ReferenceError", "is not defined",
+)
+
+
+def falha_de_assercao(saida: str) -> bool:
+    """O vermelho veio de uma asserção, e só dela."""
+    saida = saida or ""
+    return any(m in saida for m in _MARCAS_ASSERCAO) and not any(
+        m in saida for m in _MARCAS_AMBIENTE
+    )
+
+
+def destino_da_correcao_inerte(
+    origem: str, saida_testes: str, falha_de_build: bool, revisoes_suite: int
+) -> str:
+    """Para onde vai uma rodada de correção que não mudou nada.
+
+    O guard acima parte da premissa de que o executor ignorou o feedback. Nem
+    sempre: medido na thread `33c19d49` (calculadora de juros, Next.js), 61 de
+    62 testes passavam e o vermelho era um teste do QA que exigia 2 casas
+    decimais com tolerância de 1e-6 num montante da ordem de 10^10 — onde o
+    próprio ponto flutuante já erra mais que isso. O código estava certo, o
+    executor é proibido de tocar na suíte, a rodada não mudou um byte, e o guard
+    derrubou a execução como se o executor tivesse falhado.
+
+    - `revisar_suite`: vermelho de asserção, e o QA ainda não revisou a suíte
+      nesta situação. Ele recebe a falha e decide se o teste está errado.
+    - `aprovacao_humana`: a revisão já aconteceu e o impasse continua. Dois
+      agentes discordando não se resolvem com mais uma rodada.
+    - `erro`: qualquer outro caso — o comportamento de antes.
+    """
+    if origem != "testes" or falha_de_build or not falha_de_assercao(saida_testes):
+        return "erro"
+    if revisoes_suite < MAX_REVISOES_SUITE:
+        return "revisar_suite"
+    return "aprovacao_humana"
+
+
+def brief_revisao_suite(saida_testes: str) -> str:
+    """O que o QA recebe quando a suíte é contestada."""
+    return (
+        "A suíte ficou VERMELHA e o desenvolvedor, depois de analisar a falha, "
+        "NÃO alterou o código: a implementação foi mantida como estava. Isso "
+        "sugere que o erro pode estar no TESTE, e não no código. Revise os "
+        "testes que falharam abaixo contra a especificação:\n"
+        "- se a expectativa ou a tolerância do teste estiver errada (por "
+        "exemplo, precisão de ponto flutuante exigida além do que a spec pede, "
+        "ou valor esperado diferente do que a spec define), corrija o teste;\n"
+        "- se o teste estiver certo e o código errado, mantenha o teste "
+        "exatamente como está.\n"
+        "Não remova nem enfraqueça teste que cobre um critério de aceite da "
+        "spec só para ficar verde.\n\n"
+        f"Saída real dos testes:\n{saida_testes}"
+    )
+
+
+def motivo_impasse_suite(saida_testes: str) -> str:
+    """Diagnóstico que acompanha o gate quando o impasse persiste."""
+    return (
+        "Impasse entre desenvolvimento e QA: a suíte continua vermelha por uma "
+        "asserção, o desenvolvedor não alterou o código em duas rodadas e o QA "
+        "manteve o teste depois de revisá-lo. Confira quem está certo antes de "
+        "autorizar — o deploy só exige que a entrega compile.\n\n"
+        f"Saída dos testes:\n{saida_testes[:1500]}"
     )

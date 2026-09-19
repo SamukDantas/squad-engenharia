@@ -117,6 +117,11 @@ def main() -> None:
         estado = grafo.get_state(config)
         if estado.next:  # pausado no gate humano
             print("\nGrafo pausado aguardando aprovação humana.")
+            motivo = (estado.values or {}).get("motivo_gate")
+            if motivo:
+                print(f"
+{motivo}
+")
             destino = _destino_deploy(estado)
             if destino:
                 print(f"Destino do deploy: {destino}")

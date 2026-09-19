@@ -28,6 +28,7 @@ MAX_REVISOES = 2              # rodadas que a opinião do revisor pode custar
 MAX_PENTEST = 2               # rodadas que uma reprovação de pentest pode custar
 MAX_VISUAL = 2                # rodadas que uma reprovação de renderização pode custar
 MAX_AMBIENTES = 2             # rodadas que uma configuração de ambiente errada pode custar
+MAX_REVISOES_SUITE = 1        # revisões da suíte pelo QA quando o dev não muda nada
 
 # Origens de feedback que reprovam **código**, não suíte: a correção muda o
 # código, então os testes precisam rodar de novo, não ser reescritos.
@@ -92,6 +93,27 @@ def pos_desenvolvimento(state: Estado, e_teste=e_teste_padrao) -> Decisao:
     pytest fica vermelho e a rodada volta ao desenvolvimento com o stack trace;
     se adicionar código sem teste, o piso de cobertura devolve ao QA.
     """
+    # Rodada de correção que não mudou nada, com o vermelho vindo de uma
+    # asserção: o erro pode ser do teste (guards.destino_da_correcao_inerte).
+    inerte = state.get("correcao_inerte")
+    if inerte == "revisar_suite":
+        return Decisao(
+            destino="escrever_testes",
+            aviso=(
+                ">>> Correção sem mudança num vermelho de asserção: o teste pode "
+                "estar errado. A suíte volta ao QA para revisão."
+            ),
+        )
+    if inerte == "aprovacao_humana":
+        return Decisao(
+            destino="aprovacao_humana",
+            teto=Teto("suite_contestada", MAX_REVISOES_SUITE),
+            aviso=(
+                ">>> Impasse entre desenvolvimento e QA sobre o mesmo teste: "
+                "gate humano com o diagnóstico."
+            ),
+        )
+
     origem = state.get("origem_feedback")
     tem_suite = any(e_teste(a) for a in state.get("arquivos", []))
     if origem in ORIGENS_QUE_PRESERVAM_A_SUITE and tem_suite:

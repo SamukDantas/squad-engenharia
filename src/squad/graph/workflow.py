@@ -206,12 +206,6 @@ def _impressao_entrega(workspace: str, perfil) -> dict[str, str]:
     return impressao
 
 
-def _conferir_correcao(antes: dict[str, str], depois: dict[str, str], origem: str) -> None:
-    falha = guards.conferir_correcao(antes, depois, origem)
-    if falha:
-        raise RuntimeError(falha)
-
-
 def _blocos_com_orcamento(
     workspace: str, arquivos: list[str], limite: int, rotulo: str
 ) -> str:
@@ -362,6 +356,7 @@ def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     return {
         **campos,
         "cobertura_ok": cobertura_ok,
+        "falha_de_build": resultado.falha_de_build,
         "feedback_qa": feedback,
         # Rodada movida por execução: se voltar ao desenvolvimento, a suíte é
         # reescrita (o veredito veio dela).
@@ -503,6 +498,7 @@ def no_aprovacao_humana(state: EstadoProjeto) -> EstadoProjeto:
             "achados_ambientes": len(state.get("achados_ambientes") or []),
             "problemas_visuais": len(state.get("problemas_visuais") or []),
             "relatorio_qa": state.get("relatorio_qa", ""),
+            "motivo": state.get("motivo_gate", ""),
         }
     )
     if str(resposta).strip().lower() not in {"sim", "s", "yes", "aprovar"}:
@@ -661,9 +657,10 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     # varredura determinística do workspace, não do texto do executor.
     arquivos = _arquivos_do_workspace(state["workspace"], perfil)
     _conferir_entrega(arquivos, state["workspace"], perfil)
+    extra = {"correcao_inerte": ""}
     if antes is not None:
-        _conferir_correcao(
-            antes, _impressao_entrega(state["workspace"], perfil), origem
+        extra = _correcao_inerte(
+            state, antes, _impressao_entrega(state["workspace"], perfil), origem
         )
     return {
         "arquivos": arquivos,
@@ -671,7 +668,38 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         "tentativas": state["tentativas"] + 1,
         # Código novo, suíte nova: o laço de testes recomeça do zero.
         "testes_tentativas": 0,
+        **extra,
     }
+
+
+def _correcao_inerte(
+    state: EstadoProjeto, antes: dict[str, str], depois: dict[str, str], origem: str
+) -> dict:
+    """Rodada de correção que não mudou nada: erro, revisão da suíte ou gate.
+
+    O domínio decide (guards.destino_da_correcao_inerte); aqui só se traduz a
+    decisão em estado. `erro` mantém o comportamento anterior — o guard levanta.
+    """
+    falha = guards.conferir_correcao(antes, depois, origem)
+    if not falha:
+        return {"correcao_inerte": ""}
+    saida = state.get("saida_testes", "")
+    revisoes = state.get("revisoes_suite", 0)
+    destino = guards.destino_da_correcao_inerte(
+        origem, saida, bool(state.get("falha_de_build")), revisoes
+    )
+    if destino == "revisar_suite":
+        return {
+            "correcao_inerte": destino,
+            "revisoes_suite": revisoes + 1,
+            "feedback_qa": guards.brief_revisao_suite(saida),
+        }
+    if destino == "aprovacao_humana":
+        return {
+            "correcao_inerte": destino,
+            "motivo_gate": guards.motivo_impasse_suite(saida),
+        }
+    raise RuntimeError(falha)
 
 
 def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
