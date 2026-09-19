@@ -325,7 +325,7 @@ em [docs/RESILIENCIA.md](docs/RESILIENCIA.md), item 34.
 
 Para publicar as entregas aprovadas, configure `DEPLOY_OWNER=<conta>` no
 `.env`. **Um projeto, um repositório:** o deploy cria
-`<DEPLOY_OWNER>/<slug do pedido>` no GitHub se ele ainda não existir, e publica
+`<DEPLOY_OWNER>/<nome curto>` no GitHub se ele ainda não existir, e publica
 a entrega ali. Sem a variável, o deploy commita apenas localmente.
 
 **A squad só publica o que compila.** Antes do push, o nó de deploy compila a
@@ -338,8 +338,15 @@ quebrada chegou ao GitHub depois de 38 testes verdes e revisão aprovada. A
 verificação roda contra o disco, não contra estado guardado: thread retomada
 dias depois prova de novo.
 
-O nome do repositório sai do pedido, não do `thread_id` — um UUID não diz nada
-a quem abre a lista de repositórios. A criação é idempotente: retomar a thread
+O nome do repositório é **curto** e diz o que o projeto é — `conversor-temperatura`,
+não `criar-um-modulo-python-de-conversao-de`. Uma chamada barata ao LLM o
+decide logo depois que a spec é aprovada, e o nome fica gravado no estado:
+retomar a thread publica no mesmo repositório, e o gate mostra o destino
+(`Destino do deploy: <DEPLOY_OWNER>/<nome> (private)`) antes de pedir o `sim`.
+Resposta fora do formato, ou provedor fora do ar, cai numa regra
+determinística (as primeiras palavras úteis do pedido, como
+`modulo-python-conversao`). No modo paralelo, cada repositório é o nome do
+serviço. A criação é idempotente: retomar a thread
 reexecuta o nó de deploy inteiro, e um repositório já criado é reaproveitado.
 Repositório novo recebe a entrega em `main`; repositório que já tem commits
 recebe em `entrega/<thread_id>`, porque cada execução tem workspace próprio e

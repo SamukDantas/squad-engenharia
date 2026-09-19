@@ -41,6 +41,20 @@ def _foi_paralela(thread_id: str) -> bool:
     return False
 
 
+def _destino_deploy(estado) -> str:
+    """Para onde o `sim` vai publicar, dito antes de pedir o `sim`.
+
+    Vazio quando não há nome gravado (maestro, que publica um repositório por
+    serviço, ou thread anterior ao nome curto) ou quando o deploy é só local.
+    """
+    nome = (estado.values or {}).get("nome_repo")
+    dono = (os.getenv("DEPLOY_OWNER") or "").strip()
+    if not nome or not dono:
+        return ""
+    visibilidade = (os.getenv("DEPLOY_VISIBILIDADE") or "private").strip().lower()
+    return f"{dono}/{nome} ({visibilidade})"
+
+
 def _rodar(grafo, entrada, config) -> None:
     for evento in grafo.stream(entrada, config=config):
         print(f"--- nó concluído: {list(evento.keys())[0]} ---")
@@ -103,6 +117,9 @@ def main() -> None:
         estado = grafo.get_state(config)
         if estado.next:  # pausado no gate humano
             print("\nGrafo pausado aguardando aprovação humana.")
+            destino = _destino_deploy(estado)
+            if destino:
+                print(f"Destino do deploy: {destino}")
             try:
                 resposta = input("Autorizar deploy? (sim/nao): ")
             except EOFError:

@@ -41,3 +41,4 @@ class EstadoProjeto(TypedDict, total=False):
     ambientes_tentativas: int      # contador só das reprovações de configuração
     deploy_ok: bool      # resultado do nó de deploy
     deploy_ref: str      # onde a entrega foi publicada (repo@branch ou commit local)
+    nome_repo: str       # nome curto do repositório, decidido uma vez após a spec

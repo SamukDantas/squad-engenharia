@@ -16,7 +16,7 @@ Uso (a partir da raiz do projeto):
 import argparse
 import json
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 DIR_PADRAO = Path("metrics")
@@ -252,6 +252,9 @@ def listar_execucoes(diretorio: Path) -> list[dict]:
 
 class _Painel(BaseHTTPRequestHandler):
     diretorio = DIR_PADRAO
+    # Conexão aberta e muda (preconnect especulativo do navegador) desiste
+    # sozinha em vez de prender uma thread para sempre.
+    timeout = 10
 
     def _responder(self, corpo: bytes, tipo: str, status: int = 200) -> None:
         self.send_response(status)
@@ -309,7 +312,13 @@ def servir(diretorio: Path, porta: int) -> None:
     _Painel.diretorio = diretorio
     # Só loopback: o painel expõe o pedido e os relatórios de uma execução, e
     # não tem autenticação nenhuma.
-    servidor = HTTPServer(("127.0.0.1", porta), _Painel)
+    #
+    # Com threads: o HTTPServer atende uma conexão por vez, e o navegador abre
+    # conexões especulativas que ficam mudas. Uma delas prendia o servidor
+    # esperando a linha de requisição, a fila enchia e o Windows passava a
+    # recusar toda conexão nova — o painel "parava" com a porta ainda aberta.
+    servidor = ThreadingHTTPServer(("127.0.0.1", porta), _Painel)
+    servidor.daemon_threads = True  # Ctrl+C não espera conexão pendurada
     print(f"Painel em http://127.0.0.1:{porta}  (lendo {diretorio}/, Ctrl+C para sair)")
     try:
         servidor.serve_forever()

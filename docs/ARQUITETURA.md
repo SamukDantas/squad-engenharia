@@ -18,7 +18,7 @@ sequenceDiagram
     participant G as Grafo LangGraph
     participant CK as Checkpointer SQLite
     participant P as Crew Planejamento (analista → arquiteto)
-    participant V as Guard de Aderência (chamada única LLM)
+    participant V as Guard de Aderência (chamada única LLM + nome do repositório)
     participant D as Executor de Desenvolvimento (OpenCode CLI ou crews CrewAI)
     participant T as Crew Testes (QA escreve pytest)
     participant GT as Guard de Critérios (chamada única LLM)
@@ -52,6 +52,8 @@ sequenceDiagram
         G->>V: spec trata do pedido? (SIM/NAO)
         alt spec coerente
             V-->>G: SIM → segue
+            G->>V: nome curto do repositório (uma vez, gravado no estado)
+            V-->>G: nome_repo, ex. conversor-temperatura (resposta inválida: regra determinística)
         else spec incoerente
             V-->>G: NAO → replaneja
             Note over G: 3ª falha: RuntimeError (interrompe com erro explícito)
@@ -103,10 +105,10 @@ sequenceDiagram
         end
     end
 
-    G->>U: interrupt( ) Autorizar deploy? (sim/nao)
+    G->>U: interrupt( ) Destino DEPLOY_OWNER/nome_repo — Autorizar deploy? (sim/nao)
     Note over G,CK: execução pausada e persistida —<br/>sobrevive a queda do processo
     U->>G: sim
-    G->>DP: git commit + push em DEPLOY_OWNER/slug (repo próprio por projeto, nó determinístico)
+    G->>DP: git commit + push em DEPLOY_OWNER/nome_repo (repo próprio por projeto, nó determinístico)
     DP-->>G: deploy_ok = true, deploy_ref
     G->>CK: checkpoint final
     G-->>U: Deploy ok: True + entrega publicada em deploy_ref
