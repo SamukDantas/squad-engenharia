@@ -34,6 +34,7 @@ from ..llm import squad_llm
 from ..adaptadores import perfis
 from ..adaptadores.config_spring import medir_ambientes
 from ..adaptadores.metricas_json import medir, registrar
+from ..adaptadores.codex_cli import executar_codex
 from ..adaptadores.opencode_cli import executar_opencode
 from ..pentest import executar_pentest, habilitado as pentest_habilitado
 from ..resiliencia import com_retry
@@ -641,6 +642,10 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
             executar_opencode(
                 state["workspace"], state["spec"], feedback, perfil
             )
+        elif executor == "codex":
+            executar_codex(
+                state["workspace"], state["spec"], feedback, perfil
+            )
         elif executor == "crews":
             crew_desenvolvimento(state["workspace"]).kickoff(
                 inputs={
@@ -651,7 +656,8 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
             )
         else:
             raise ValueError(
-                f"DEV_EXECUTOR inválido: '{executor}'. Use 'opencode' ou 'crews'."
+                f"DEV_EXECUTOR inválido: '{executor}'. Use 'opencode', 'codex' "
+                "ou 'crews'."
             )
     # O que vale é o que está no disco: o manifesto do estado vem de uma
     # varredura determinística do workspace, não do texto do executor.

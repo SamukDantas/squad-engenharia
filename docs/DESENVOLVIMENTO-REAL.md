@@ -95,7 +95,7 @@ a squad vira a **gerência**: guard, QA real e gate governando um executor que
 já é excelente em escrever código.
 
 *Desenho implementado:* executor **intercambiável** via `DEV_EXECUTOR`
-(`opencode`, padrão, ou `crews`) — a governança do grafo é idêntica nos dois
+(`opencode`, padrão, `codex` ou `crews`) — a governança do grafo é idêntica nos dois
 casos, porque o nó lê o disco, não o texto do executor. As instruções vão
 para `.squad/tarefa.md` dentro do workspace e o prompt do CLI é uma linha
 única apontando para o arquivo: no Windows o binário é o shim `opencode.CMD`

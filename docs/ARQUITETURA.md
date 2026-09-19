@@ -19,7 +19,7 @@ sequenceDiagram
     participant CK as Checkpointer SQLite
     participant P as Crew Planejamento (analista → arquiteto)
     participant V as Guard de Aderência (chamada única LLM + nome do repositório)
-    participant D as Executor de Desenvolvimento (OpenCode CLI ou crews CrewAI)
+    participant D as Executor de Desenvolvimento (OpenCode CLI, Codex CLI ou crews CrewAI)
     participant T as Crew Testes (QA escreve pytest)
     participant GT as Guard de Critérios (chamada única LLM)
     participant WS as Workspace (workspace/thread_id)
@@ -120,8 +120,10 @@ sequenceDiagram
    qualquer LLM rodar; a entrega vive como arquivos, não como string no
    estado do grafo.
 2. **Executor de desenvolvimento intercambiável**: `DEV_EXECUTOR` escolhe
-   entre o OpenCode CLI (padrão) e as crews CrewAI. A governança é a mesma
-   nos dois casos — o grafo lê o disco, não o texto do executor.
+   entre o OpenCode CLI (padrão), o Codex CLI e as crews CrewAI. A governança
+   é a mesma nos três casos — o grafo lê o disco, não o texto do executor. A
+   tarefa é compartilhada (`adaptadores/tarefa_executor.py`) para a troca de
+   executor medir o executor, e não a diferença entre dois prompts.
 3. **Qualidade em quatro participantes**: a crew de testes escreve pytest
    real, o guard de critérios confere se a suíte testa o que a spec exige, o
    pytest executa em nó determinístico (sem LLM) e o revisor LLM cobre o que
