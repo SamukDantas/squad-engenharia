@@ -26,6 +26,7 @@ from src.squad.adaptadores import perfis  # noqa: E402
 from src.squad.adaptadores.metricas_json import eventos, registrar, resumo  # noqa: E402
 from src.squad.graph.maestro import construir_maestro  # noqa: E402
 from src.squad.graph.workflow import DeployNegado, construir_grafo  # noqa: E402
+from src.squad.llm import conferir_credencial  # noqa: E402
 
 
 def _foi_paralela(thread_id: str) -> bool:
@@ -76,6 +77,17 @@ def main() -> None:
              f"Sem a flag, usa STACK do .env; sem ela, '{perfis.PERFIL_PADRAO}'.",
     )
     args = parser.parse_args()
+
+    # Antes de qualquer nó: credencial ausente ou sessão expirada vira erro com
+    # a instrução de login aqui, e não `Connection error` no meio do
+    # planejamento já pago (ver llm.conferir_credencial).
+    try:
+        conferir_credencial()
+    except RuntimeError as e:
+        # Traceback aqui não ajuda ninguém: a mensagem já diz o que fazer, e a
+        # pilha só empurra a instrução para fora da tela.
+        print(f"\n{e}")
+        raise SystemExit(1)
 
     if args.thread:
         thread_id = args.thread
