@@ -129,3 +129,24 @@ def _timeout_acessoria() -> int:
 
 # Nome antigo, de quando o Zen era o único provedor.
 zen_llm = squad_llm
+
+
+def conferir_credencial() -> None:
+    """Credencial do provedor conferida na entrada, antes de pagar qualquer nó.
+
+    O erro do token Keycloak nasce dentro do interceptor, no meio de uma
+    chamada HTTP, e o SDK da OpenAI o reembala como `Failed to connect to
+    OpenAI API: Connection error` — a instrução de login, que existe e é
+    precisa, some no caminho. Medido: uma execução morreu no planejamento com
+    essa mensagem genérica, apontando para rede quando o problema era sessão
+    expirada.
+
+    Na entrada e não num nó do grafo: é condição de partida, como a stack
+    inválida, e o grafo continua sem tocar em credencial.
+    """
+    if provedor() != "gateway":
+        return
+    try:
+        token_valido()
+    except RuntimeError as e:
+        raise RuntimeError(f"Credencial do provedor indisponível.\n{e}") from e

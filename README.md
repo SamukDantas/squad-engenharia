@@ -38,8 +38,11 @@ ilegível no tema escuro (1,28:1 medido, exigido 4,5:1).
 
 O nó de desenvolvimento é **intercambiável** (`DEV_EXECUTOR`): por padrão usa
 o **OpenCode CLI** em modo headless como mão de obra, com a squad no papel de
-gerência (guard, QA real e gate governando o executor); `crews` mantém o
-caminho com as crews CrewAI, sem dependência externa. Do mesmo jeito, o
+gerência (guard, QA real e gate governando o executor); `codex` usa o **Codex
+CLI** (`codex exec`) do mesmo jeito; `crews` mantém o caminho com as crews
+CrewAI, sem dependência externa. A tarefa que os dois CLIs recebem é a mesma
+(`adaptadores/tarefa_executor.py`) — o que muda é a jaula de cada um, e a
+governança do grafo não muda em nenhum caso. Do mesmo jeito, o
 **provedor de LLM** é escolhido por `LLM_PROVEDOR` (gateway gateway corporativo on-premise
 ou OpenCode Zen), sem mudar nada na governança do grafo.
 
@@ -69,7 +72,8 @@ squad-engenharia/
     │   ├── agents.yaml         # definição dos agentes (papéis, goals, backstories)
     │   └── tasks.yaml          # definição das tarefas de cada crew
     ├── portas/                 # as formas: perfil de stack, testes, executor, métricas
-    ├── adaptadores/            # implementações: perfil python, runner de testes, opencode, métricas
+    ├── adaptadores/            # implementações: perfil python, runner de testes, opencode, codex, métricas
+    │   ├── tarefa_executor.py  # a tarefa que todo executor recebe (texto e .squad/tarefa.md)
     │   └── keycloak_token.py   # token do gateway corporativo: lê e renova o login do OpenCode
     ├── dominio/                # as decisões, sem nenhuma tecnologia
     │   ├── rotas.py            # para onde ir depois de cada nó, e os tetos
@@ -114,6 +118,34 @@ trace real.
 No modo padrão (`DEV_EXECUTOR=opencode`) é preciso ter o **OpenCode CLI**
 instalado e autenticado (`npm i -g opencode-ai`). Para rodar sem o CLI, use
 `DEV_EXECUTOR=crews` no `.env`.
+
+Com `DEV_EXECUTOR=codex`, o executor é o **Codex CLI** (`npm i -g
+@openai/codex`, e `codex` uma vez para o login — a conta ChatGPT serve, sem
+chave de API). O pacote da Microsoft Store **não** serve: o binário dele fica
+numa pasta protegida e responde "Acesso negado". O escopo por execução sai de
+graça, com flag em vez de config injetada (`--sandbox workspace-write`,
+`--ignore-user-config`, `--ignore-rules`, `--ephemeral`), e `--json` dá a
+falha explícita (`turn.failed`) em vez de caça-frases na saída.
+
+No Windows há um detalhe que precisa estar declarado: o modo do sandbox nativo
+vem do `config.toml`, que o `--ignore-user-config` ignora junto. A squad manda
+`CODEX_SANDBOX_WINDOWS` (padrão `unelevated`; `elevated` é mais forte e exige
+instalação como administrador). Sem isso, a política recusa **todo** comando,
+inclusive leitura, e a run termina com exit 0 sem ter feito nada.
+
+O mesmo `--ignore-user-config` vale para o **modelo**: o `model` do seu
+`config.toml` não chega ao executor, e sem `CODEX_RUN_MODEL` quem escolhe é o
+padrão do servidor. Fixe a variável quando quiser garantia de qual modelo
+roda. Com login por conta ChatGPT só valem os modelos liberados para o plano —
+medido nesta máquina: `gpt-5.6-terra`, `gpt-5.6-luna` e `gpt-5.5` respondem, e
+qualquer outro nome (inclusive o `gpt-5.6-sol` que a documentação cita) volta
+`400 not supported when using Codex with a ChatGPT account`. O catálogo da sua
+conta está em `~/.codex/models_cache.json`.
+
+O executor é a **única** superfície que o Codex cobre. Os agentes (planejamento,
+QA, revisão, guards) são CrewAI e falam com um endpoint compatível com OpenAI;
+o Codex CLI é um agente de terminal, não um endpoint, e por isso continua sendo
+`LLM_PROVEDOR` quem decide o modelo deles.
 
 O `--dir` do CLI troca o diretório de trabalho, mas **não isola a
 configuração**: sem intervenção, o executor herda o `opencode.json` global da

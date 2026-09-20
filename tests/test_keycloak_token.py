@@ -221,3 +221,25 @@ def test_config_global_jsonc_e_aceito(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert opencode_cli._mcp_declarados() == ["x"]
+
+
+# ---------- credencial conferida na entrada ----------
+
+def test_credencial_ausente_falha_com_instrucao_de_login(arquivo, monkeypatch):
+    """Sem esta checagem, o erro do token nasce dentro do interceptor e o SDK
+    da OpenAI o reembala como `Connection error` — a instrução some, e a
+    execução morre no planejamento apontando para rede."""
+    monkeypatch.setenv("LLM_PROVEDOR", "gateway")
+    with pytest.raises(RuntimeError, match="Credencial do provedor"):
+        llm.conferir_credencial()
+
+
+def test_credencial_valida_passa_calada(arquivo, monkeypatch):
+    monkeypatch.setenv("LLM_PROVEDOR", "gateway")
+    _gravar(arquivo, access_token="ok", refresh_token="r", expires_at=_agora_ms() + HORA_MS)
+    assert llm.conferir_credencial() is None
+
+
+def test_zen_nao_depende_do_keycloak(arquivo, monkeypatch):
+    monkeypatch.setenv("LLM_PROVEDOR", "zen")
+    assert llm.conferir_credencial() is None
