@@ -133,6 +133,20 @@ vem do `config.toml`, que o `--ignore-user-config` ignora junto. A squad manda
 instalação como administrador). Sem isso, a política recusa **todo** comando,
 inclusive leitura, e a run termina com exit 0 sem ter feito nada.
 
+O mesmo `--ignore-user-config` vale para o **modelo**: o `model` do seu
+`config.toml` não chega ao executor, e sem `CODEX_RUN_MODEL` quem escolhe é o
+padrão do servidor. Fixe a variável quando quiser garantia de qual modelo
+roda. Com login por conta ChatGPT só valem os modelos liberados para o plano —
+medido nesta máquina: `gpt-5.6-terra`, `gpt-5.6-luna` e `gpt-5.5` respondem, e
+qualquer outro nome (inclusive o `gpt-5.6-sol` que a documentação cita) volta
+`400 not supported when using Codex with a ChatGPT account`. O catálogo da sua
+conta está em `~/.codex/models_cache.json`.
+
+O executor é a **única** superfície que o Codex cobre. Os agentes (planejamento,
+QA, revisão, guards) são CrewAI e falam com um endpoint compatível com OpenAI;
+o Codex CLI é um agente de terminal, não um endpoint, e por isso continua sendo
+`LLM_PROVEDOR` quem decide o modelo deles.
+
 O `--dir` do CLI troca o diretório de trabalho, mas **não isola a
 configuração**: sem intervenção, o executor herda o `opencode.json` global da
 sua máquina — servidores MCP e skills incluídos. Numa instalação real isso
