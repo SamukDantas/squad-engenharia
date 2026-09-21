@@ -83,14 +83,16 @@ consolidar_entrega:
     inconsistências entre backend e integração editando os arquivos com
     escrever_arquivo, e escreva um README.md na raiz do workspace com a
     estrutura de arquivos e as instruções de execução.
-    Escreva também `.squad/run.json` declarando como subir a aplicação como
-    servidor HTTP, para o pipeline de segurança atacá-la. Formato exato:
+    SÓ SE a entrega for um servidor ou aplicação HTTP (API, página web),
+    escreva também `.squad/run.json` declarando como subi-la, para o
+    pipeline de segurança atacá-la. Formato exato:
     {exemplo_run_json}
     Use o comando real desta entrega (módulo e porta corretos); health_path
-    é uma rota que responde com a app no ar.
+    é uma rota que responde com a app no ar. Se a spec pede só um módulo,
+    biblioteca ou CLI, NÃO crie servidor HTTP nem `run.json`.
   expected_output: >
-    Manifesto final dos arquivos da entrega, com o README.md e o
-    .squad/run.json incluídos.
+    Manifesto final dos arquivos da entrega, com o README.md e, quando a
+    entrega for um servidor, o .squad/run.json.
   agent: tech_lead
 
 # --- Crew de qualidade ---

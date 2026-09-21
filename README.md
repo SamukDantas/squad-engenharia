@@ -437,12 +437,40 @@ aparece é `Repository not found` — `gh auth switch --user <conta>` resolve.
 - A crew de desenvolvimento é sequencial (backend → integração → tech lead
   consolida), sem delegação dinâmica — mais determinística e barata.
 
-## Provedor de LLM: gateway corporativo ou OpenCode Zen
+## Provedor de LLM: Codex, gateway corporativo ou OpenCode Zen
 
 `LLM_PROVEDOR` escolhe quem responde aos agentes. O fluxo, com a checagem do
 token, está no diagrama de sequência do [ARQUITETURA.md](docs/ARQUITETURA.md).
 
-### Gateway corporativo de IA (padrão)
+### Codex (`LLM_PROVEDOR=codex`)
+
+Todos os agentes rodam pelo **Codex CLI**, com o login da conta ChatGPT — sem
+endpoint HTTP, sem chave de API e sem Keycloak. Combine com
+`DEV_EXECUTOR=codex` para a squad inteira rodar num só provedor:
+
+```
+LLM_PROVEDOR=codex
+DEV_EXECUTOR=codex
+CODEX_RUN_MODEL=gpt-5.6-luna
+```
+
+- **Agentes que só respondem texto** (planejamento, revisão, decomposição,
+  contratos, guards, nome do repositório) usam o `CodexLLM`, uma subclasse de
+  `BaseLLM` do CrewAI: cada chamada é um `codex exec` em sandbox **read-only**,
+  num diretório vazio, com o pedido pelo stdin — argumento multilinha é
+  truncado pelo atalho do npm no Windows.
+- **O QA**, que grava arquivos, roda como o executor: `codex exec` direto no
+  workspace, com a mesma tarefa `escrever_testes` do `tasks.yaml`. Depois, o
+  grafo desfaz qualquer arquivo que ele tenha mexido **fora da suíte** — o
+  código é do executor, assim como a suíte é do QA.
+- Agente com ferramenta pelo CrewAI não roda neste provedor: com
+  `DEV_EXECUTOR=crews`, a squad falha na montagem, antes de pagar nó nenhum.
+
+Medido no mesmo pedido (conversor de temperaturas): **8,0 min** de nós com
+tudo pelo Codex, contra 12,7 min com o Codex só no executor e os agentes no
+gateway corporativo.
+
+### Gateway corporativo de IA
 
 Gateway on-premise cedido por um cliente, compatível com OpenAI
 (`https://ai-gateway.example.com/v1`), com um único

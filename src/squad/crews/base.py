@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 from crewai import Agent, Task
 
-from ..llm import squad_llm
+from ..llm import provedor, squad_llm
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 
@@ -35,6 +35,14 @@ TASKS_CFG = _load("tasks.yaml")
 
 
 def build_agent(key: str, tools: list | None = None, **overrides) -> Agent:
+    if tools and provedor() == "codex":
+        # O CodexLLM só responde texto. Falhar aqui, na montagem, poupa a
+        # execução de pagar planejamento e guards para morrer no nó seguinte.
+        raise RuntimeError(
+            f"O agente '{key}' usa ferramentas, e com LLM_PROVEDOR=codex agente "
+            "com ferramenta não roda pelo CrewAI: o QA roda pelo Codex no "
+            "workspace, e o executor deve ser DEV_EXECUTOR=codex (não crews)."
+        )
     cfg = {**AGENTS_CFG[key], **overrides}
     return Agent(
         role=cfg["role"],
