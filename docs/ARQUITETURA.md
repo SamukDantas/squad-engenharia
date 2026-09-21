@@ -165,6 +165,10 @@ sequenceDiagram
    `metrics/<thread_id>.json` — incluindo a origem de cada rodada de
    desenvolvimento (inicial, testes ou revisão) —, com resumo impresso ao
    final. Sem isso não há como saber se uma mudança melhorou o resultado.
+   Com o Codex, cada nó grava também os tokens gastos, e os marcos da
+   execução gravam a cota da conta, lida pelo `codex app-server` sem chamar
+   modelo — a diferença entre o primeiro e o último marco é quanto a execução
+   custou do plano.
 12. **Provedor de LLM intercambiável**: `LLM_PROVEDOR` escolhe entre o
    Codex CLI (`codex`, padrão), o gateway gateway corporativo on-premise (`gateway`) e o
    OpenCode Zen (`zen`), como `DEV_EXECUTOR` escolhe o executor — a

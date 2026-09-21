@@ -23,11 +23,16 @@ a mesma armadilha do item 15 do RESILIENCIA.md, agora com outro binário.
 """
 import json
 import os
+import queue
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
+from . import consumo
 from .tarefa_executor import (
     DIR_SQUAD,
     LIMITE_SAIDA,
@@ -186,6 +191,8 @@ def _rodar(comando: list[str], timeout: int, rotulo: str, entrada: str | None = 
         )
 
     saida = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()
+    # Antes de olhar o exit code: chamada que falhou também gastou cota.
+    consumo.acumular(consumo.uso_do_stream(saida))
     trecho = relatavel(saida[-LIMITE_SAIDA:])
     if r.returncode != 0:
         raise RuntimeError(f"Codex CLI falhou em {rotulo} (exit {r.returncode}):\n{trecho}")
@@ -276,3 +283,90 @@ def executar_qa(workspace: str, descricao: str) -> str:
     saida = _rodar(_comando(workspace, PROMPT_QA), _timeout(), "escrita de testes")
     print(relatavel((_resumo(saida) or saida)[-LIMITE_SAIDA:]))
     return saida
+
+
+# ---------- cota da conta ----------
+
+TIMEOUT_COTA = 20
+
+
+def _cota_crua(timeout: int) -> dict | None:
+    """A resposta de `account/rateLimits/read` do app-server, ou None.
+
+    O `codex exec` não informa a cota; o app-server informa, pelo mesmo login,
+    **sem chamar modelo nenhum** — ler a cota não gasta cota. O stdin fica
+    aberto até a resposta chegar: fechado antes, o servidor sai sem responder
+    (medido: exit 0 em 0,7 s e nenhuma resposta).
+    """
+    processo = subprocess.Popen(
+        [_binario(), "app-server"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    linhas: queue.Queue = queue.Queue()
+    threading.Thread(
+        target=lambda: [linhas.put(ln) for ln in processo.stdout], daemon=True
+    ).start()
+    try:
+        for mensagem in (
+            {"method": "initialize", "id": 0,
+             "params": {"clientInfo": {"name": "squad", "version": "1"}}},
+            {"method": "initialized"},
+            {"method": "account/rateLimits/read", "id": 1},
+        ):
+            processo.stdin.write(json.dumps(mensagem) + "\n")
+        processo.stdin.flush()
+        prazo = time.monotonic() + timeout
+        while (restante := prazo - time.monotonic()) > 0:
+            try:
+                linha = linhas.get(timeout=restante)
+            except queue.Empty:
+                break
+            try:
+                resposta = json.loads(linha)
+            except ValueError:
+                continue
+            if resposta.get("id") == 1:
+                return resposta.get("result")
+        return None
+    finally:
+        processo.kill()
+
+
+def _janela(janela: dict | None) -> dict | None:
+    if not janela or janela.get("usedPercent") is None:
+        return None
+    zera = janela.get("resetsAt")
+    return {
+        "usado_pct": janela["usedPercent"],
+        "janela_h": round((janela.get("windowDurationMins") or 0) / 60, 1),
+        "zera_em": (
+            datetime.fromtimestamp(zera, timezone.utc).isoformat(timespec="seconds")
+            if zera else None
+        ),
+    }
+
+
+def cota(timeout: int = TIMEOUT_COTA) -> dict | None:
+    """Quanto da cota da conta ChatGPT já foi usado, para gravar nas métricas.
+
+    Nunca levanta: a leitura usa uma API marcada como experimental, e medir
+    não pode derrubar a execução que está sendo medida. Sem resposta, None.
+
+    `usado_pct` vem inteiro do servidor. Numa execução que gasta 4 ou 5
+    pontos a resolução basta; num nó isolado, não — por isso a cota é lida
+    nos marcos da execução, e o gasto por nó fica com os tokens (`consumo.py`).
+    """
+    try:
+        resultado = _cota_crua(timeout)
+    except Exception:
+        return None
+    limites = (resultado or {}).get("rateLimits") or {}
+    principal = _janela(limites.get("primary"))
+    if not principal:
+        return None
+    lida = {"plano": limites.get("planType"), **principal}
+    secundaria = _janela(limites.get("secondary"))
+    if secundaria:
+        lida["secundaria"] = secundaria
+    return lida

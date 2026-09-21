@@ -19,6 +19,8 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from .adaptadores.metricas_json import gasto_da_cota
+
 DIR_PADRAO = Path("metrics")
 PORTA_PADRAO = 4949
 ARQUIVO_HTML = Path(__file__).with_name("painel.html")
@@ -131,6 +133,18 @@ def _desfecho(marcos: list[dict], barras: list[dict]) -> str:
     return "indeterminado"
 
 
+def _tokens(evento: dict) -> int:
+    """Tokens de um nó: entrada mais saída (o cache é parte da entrada)."""
+    uso = evento.get("tokens") or {}
+    return int(uso.get("entrada", 0)) + int(uso.get("saida", 0))
+
+
+def _cota_legivel(cota: dict) -> str:
+    """A leitura da cota como texto, para a tabela de marcos."""
+    zera = (cota.get("zera_em") or "")[:10]
+    return f"{cota.get('usado_pct')}% ({cota.get('plano')}, zera {zera})"
+
+
 def detalhar(diretorio: Path, thread_id: str) -> dict | None:
     """Eventos crus mais os derivados que as telas consomem."""
     eventos = _eventos(diretorio, thread_id)
@@ -145,7 +159,7 @@ def detalhar(diretorio: Path, thread_id: str) -> dict | None:
     # corte que separa trabalho novo de retrabalho.
     rodadas: list[dict] = [
         {"n": 0, "origem": "preparacao", "duracao_s": 0.0,
-         "chars_contexto": 0, "inicio_s": 0.0}
+         "chars_contexto": 0, "tokens": 0, "inicio_s": 0.0}
     ]
     barras: list[dict] = []
     marcos: list[dict] = []
@@ -164,6 +178,7 @@ def detalhar(diretorio: Path, thread_id: str) -> dict | None:
                 or ("inicial" if len(rodadas) == 1 else "indeterminada"),
                 "duracao_s": 0.0,
                 "chars_contexto": 0,
+                "tokens": 0,
                 "inicio_s": round(ini - inicio_run, 1),
             })
 
@@ -177,6 +192,7 @@ def detalhar(diretorio: Path, thread_id: str) -> dict | None:
         }
         if medido:
             item["chars_contexto"] = int(evento.get("chars_contexto") or 0)
+            item["tokens"] = _tokens(evento)
             # Por que a rodada ficou vermelha, gravado pelo nó de testes — a
             # saída em si é sobrescrita pela rodada seguinte.
             if evento.get("trecho_falha"):
@@ -184,9 +200,11 @@ def detalhar(diretorio: Path, thread_id: str) -> dict | None:
             barras.append(item)
             rodadas[-1]["duracao_s"] += item["duracao_s"]
             rodadas[-1]["chars_contexto"] += item["chars_contexto"]
+            rodadas[-1]["tokens"] += item["tokens"]
         else:
             item["detalhe"] = {
-                k: v for k, v in evento.items() if k not in _CAMPOS_ESTRUTURAIS
+                k: (_cota_legivel(v) if k == "cota_codex" else v)
+                for k, v in evento.items() if k not in _CAMPOS_ESTRUTURAIS
             }
             marcos.append(item)
 
@@ -213,6 +231,8 @@ def detalhar(diretorio: Path, thread_id: str) -> dict | None:
         "fora_dos_nos_s": round(max(0.0, wall - tempo_nos), 1),
         "retrabalho_s": retrabalho,
         "chars_contexto": sum(b["chars_contexto"] for b in barras),
+        "tokens": sum(b["tokens"] for b in barras),
+        "cota": gasto_da_cota(eventos),
         "rodadas": rodadas,
         "barras": barras,
         "marcos": marcos,
@@ -248,6 +268,8 @@ def listar_execucoes(diretorio: Path) -> list[dict]:
             "tetos": [t["detalhe"].get("laco", "?") for t in detalhe["tetos"]],
             "retomadas": detalhe["retomadas"],
             "cobertura": _cobertura_final(eventos),
+            "tokens": detalhe["tokens"],
+            "cota_pts": (detalhe["cota"] or {}).get("gasto_pct"),
         })
     return sorted(linhas, key=lambda linha: linha["inicio"], reverse=True)
 

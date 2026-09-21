@@ -14,6 +14,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from . import consumo
+
 DIR_METRICAS = Path("metrics")
 
 
@@ -70,27 +72,66 @@ def medir(thread_id: str, evento: str, **dados):
     conta suspensão do sistema. Numa execução longa a diferença desloca a
     barra na linha do tempo — e quem lê o histórico não deveria ter que
     reconstruir o início.
+
+    Os tokens gastos com o provedor dentro do bloco entram como `tokens`
+    (`consumo.py`), só quando houve gasto: nó sem LLM não ganha campo vazio.
     """
     inicio = time.monotonic()
     inicio_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     extras: dict = {}
-    try:
-        yield extras
-    except Exception as e:
-        registrar(
-            thread_id, evento,
-            inicio=inicio_iso,
-            duracao_s=round(time.monotonic() - inicio, 1),
-            erro=f"{type(e).__name__}: {e}"[:300],
-            **dados, **extras,
-        )
-        raise
+    with consumo.contar() as tokens:
+        try:
+            yield extras
+        except Exception as e:
+            if tokens:
+                extras["tokens"] = dict(tokens)
+            registrar(
+                thread_id, evento,
+                inicio=inicio_iso,
+                duracao_s=round(time.monotonic() - inicio, 1),
+                erro=f"{type(e).__name__}: {e}"[:300],
+                **dados, **extras,
+            )
+            raise
+    if tokens:
+        extras["tokens"] = dict(tokens)
     registrar(
         thread_id, evento,
         inicio=inicio_iso,
         duracao_s=round(time.monotonic() - inicio, 1),
         **dados, **extras,
     )
+
+
+def somar_tokens(eventos: list[dict]) -> dict:
+    """Os tokens de todos os nós da execução, campo a campo."""
+    total: dict = {}
+    for evento in eventos:
+        for campo, valor in (evento.get("tokens") or {}).items():
+            total[campo] = total.get(campo, 0) + valor
+    return total
+
+
+def gasto_da_cota(eventos: list[dict]) -> dict | None:
+    """Da primeira à última leitura da cota do Codex nos marcos da execução.
+
+    A cota é da conta, não da execução: uso do Codex fora da squad na mesma
+    janela entra na conta. E, se a janela zerou no meio (`zera_em` mudou), a
+    diferença não significa nada — nesse caso não há gasto a reportar.
+    """
+    leituras = [e["cota_codex"] for e in eventos if e.get("cota_codex")]
+    if len(leituras) < 2:
+        return None
+    antes, depois = leituras[0], leituras[-1]
+    if antes.get("zera_em") != depois.get("zera_em"):
+        return None
+    return {
+        "plano": depois.get("plano"),
+        "antes": antes["usado_pct"],
+        "depois": depois["usado_pct"],
+        "gasto_pct": depois["usado_pct"] - antes["usado_pct"],
+        "zera_em": depois.get("zera_em"),
+    }
 
 
 def resumo(thread_id: str) -> str:
@@ -177,6 +218,21 @@ def resumo(thread_id: str) -> str:
         linhas.append(
             f"  Contexto enviado ao LLM     : {contexto:,} chars"
             f" (maior: {maior['evento']} {maior.get('chars_contexto', 0):,})"
+        )
+
+    tokens = somar_tokens(eventos)
+    if tokens:
+        linhas.append(
+            f"  Tokens do provedor          : {tokens.get('entrada', 0):,} de entrada"
+            f" ({tokens.get('entrada_cache', 0):,} em cache),"
+            f" {tokens.get('saida', 0):,} de saída em {tokens.get('chamadas', 0)} chamadas"
+        )
+    gasto = gasto_da_cota(eventos)
+    if gasto:
+        linhas.append(
+            f"  Cota do Codex               : {gasto['antes']}% → {gasto['depois']}%"
+            f" (+{gasto['gasto_pct']} pts, plano {gasto['plano']},"
+            f" zera em {(gasto['zera_em'] or '?')[:10]})"
         )
 
     # Só os nós medidos entram no ranking: marcos sem duração (`teto_atingido`,
