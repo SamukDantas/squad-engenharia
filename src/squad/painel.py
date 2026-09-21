@@ -241,6 +241,14 @@ def detalhar(diretorio: Path, thread_id: str) -> dict | None:
     }
 
 
+def _reexecucao(detalhe: dict) -> dict | None:
+    """De onde a thread foi bifurcada, quando é uma reexecução (graph/reexecucao.py)."""
+    for marco in detalhe["marcos"]:
+        if marco["evento"] == "inicio_execucao":
+            return marco["detalhe"].get("reexecucao")
+    return None
+
+
 def _cobertura_final(eventos: list[dict]) -> float | None:
     testes = [e for e in eventos if e["evento"] == "executar_testes"]
     return testes[-1].get("cobertura") if testes else None
@@ -269,6 +277,7 @@ def listar_execucoes(diretorio: Path) -> list[dict]:
             "retomadas": detalhe["retomadas"],
             "cobertura": _cobertura_final(eventos),
             "tokens": detalhe["tokens"],
+            "reexecucao": _reexecucao(detalhe),
             "cota_pts": (detalhe["cota"] or {}).get("gasto_pct"),
         })
     return sorted(linhas, key=lambda linha: linha["inicio"], reverse=True)

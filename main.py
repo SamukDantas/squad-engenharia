@@ -3,6 +3,8 @@
 Uso:
   python main.py "Criar endpoint de healthcheck"        # nova execução
   python main.py --thread <id>                           # retomar execução interrompida
+  python main.py --thread <id> --a-partir-de escrever_testes
+                                                         # thread nova, dali em diante
 
 O thread id é impresso no início de cada execução. Com o checkpointer SQLite,
 uma queda no meio (erro 503 do provedor, Ctrl+C, crash) não perde o progresso:
@@ -25,6 +27,7 @@ load_dotenv(override=True)
 from src.squad.adaptadores import codex_cli, perfis  # noqa: E402
 from src.squad.adaptadores.metricas_json import eventos, registrar, resumo  # noqa: E402
 from src.squad.dominio.rotas import retomada_chama_llm  # noqa: E402
+from src.squad.graph import reexecucao  # noqa: E402
 from src.squad.graph.maestro import construir_maestro  # noqa: E402
 from src.squad.graph.workflow import DeployNegado, construir_grafo  # noqa: E402
 from src.squad.llm import conferir_credencial, provedor  # noqa: E402
@@ -41,6 +44,56 @@ def _foi_paralela(thread_id: str) -> bool:
         if e.get("evento") == "inicio_execucao":
             return bool(e.get("paralelo"))
     return False
+
+
+def _entrada_da_thread(thread_id: str) -> str:
+    """O primeiro nó com que a thread foi criada: `triagem`, ou o nó de onde
+    uma reexecução partiu. Retomar exige o mesmo grafo, como no paralelo."""
+    for e in eventos(thread_id):
+        if e.get("evento") == "inicio_execucao":
+            return (e.get("reexecucao") or {}).get("a_partir_de") or "triagem"
+    return "triagem"
+
+
+def _reexecutar(origem: str, no: str) -> tuple[str, dict]:
+    """Cria a thread nova a partir do estado de `origem` antes de `no`.
+
+    Devolve o id novo e a entrada do grafo (reexecucao.py).
+    """
+    if no not in reexecucao.NOS_REEXECUTAVEIS:
+        raise SystemExit(
+            f"Nó '{no}' não serve de ponto de partida. Use um destes: "
+            f"{', '.join(reexecucao.NOS_REEXECUTAVEIS)}."
+        )
+    if _foi_paralela(origem):
+        raise SystemExit(
+            "Reexecução a partir de um nó ainda não existe para thread paralela: "
+            "cada serviço tem o próprio ramo."
+        )
+    estado = reexecucao.estado_antes_do_no(construir_grafo().checkpointer, origem, no)
+    if not estado:
+        raise SystemExit(
+            f"A thread {origem} nunca chegou a '{no}': não há estado de onde partir."
+        )
+    perfil = perfis.obter(estado.get("stack"))
+    from src.squad.graph.workflow import _arquivos_do_workspace
+    agora = _arquivos_do_workspace(estado["workspace"], perfil)
+    novo = str(uuid.uuid4())
+    entrada, removidos = reexecucao.preparar(
+        estado, novo, agora, reexecucao.pastas_fora_da_copia(perfil.ignorar_no_workspace)
+    )
+    print(f"Reexecução de {origem} a partir de '{no}'.")
+    print(f"Thread id desta execução: {novo}")
+    print("(guarde para retomar com: python main.py --thread " + novo + ")")
+    if removidos:
+        print(f"Arquivos que ainda não existiam naquele ponto, fora da cópia: {', '.join(removidos)}")
+    registrar(
+        novo, "inicio_execucao",
+        pedido=estado.get("pedido", ""), stack=estado.get("stack"), paralelo=False,
+        reexecucao={"thread_origem": origem, "a_partir_de": no},
+        **_cota(),
+    )
+    return novo, entrada
 
 
 def _destino_deploy(estado) -> str:
@@ -104,6 +157,12 @@ def main() -> None:
     parser.add_argument("pedido", nargs="*", help="Pedido para a squad")
     parser.add_argument("--thread", help="Retomar a execução com este thread id")
     parser.add_argument(
+        "--a-partir-de",
+        metavar="NO",
+        help="Com --thread: cria uma thread NOVA com o estado daquela antes do nó "
+             "indicado e roda dali em diante. A thread de origem não muda.",
+    )
+    parser.add_argument(
         "--paralelo",
         action="store_true",
         help="Decompõe o pedido em microsserviços e os constrói em paralelo, "
@@ -116,8 +175,21 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.thread:
+    if args.a_partir_de and not args.thread:
+        parser.error("--a-partir-de exige --thread <id da thread de origem>")
+
+    no_de_entrada = "triagem"
+    if args.a_partir_de:
+        # Conferida antes de criar a thread, como numa execução nova: mesmo
+        # partindo de um nó sem LLM, o laço volta ao desenvolvimento no vermelho.
+        _exigir_credencial()
+        no_de_entrada = args.a_partir_de
+        thread_id, entrada = _reexecutar(args.thread, args.a_partir_de)
+        paralelo = False
+        config = {"configurable": {"thread_id": thread_id}}
+    elif args.thread:
         thread_id = args.thread
+        no_de_entrada = _entrada_da_thread(thread_id)
         paralelo = _foi_paralela(thread_id)
         config = {"configurable": {"thread_id": thread_id}}
         print(f"Retomando thread {thread_id} do último checkpoint"
@@ -148,8 +220,8 @@ def main() -> None:
         if paralelo:
             print("Modo paralelo: o pedido será decomposto em microsserviços.")
 
-    grafo = construir_maestro() if paralelo else construir_grafo()
-    if args.thread and retomada_chama_llm(grafo.get_state(config).next):
+    grafo = construir_maestro() if paralelo else construir_grafo(no_de_entrada)
+    if args.thread and not args.a_partir_de and retomada_chama_llm(grafo.get_state(config).next):
         _exigir_credencial()
 
     # O gate humano entra no try: negar o deploy levanta, e esse desfecho é tão

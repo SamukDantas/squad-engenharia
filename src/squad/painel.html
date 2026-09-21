@@ -59,6 +59,8 @@
   tbody tr.clicavel:hover td { background: var(--papel); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .truncar { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .id-thread code { font-size: 12px; user-select: all; }
+  .id-thread .origem { font-size: 11px; color: var(--fraco); white-space: nowrap; }
 
   .cartoes { display: flex; flex-wrap: wrap; gap: 10px; }
   .cartao {
@@ -186,6 +188,7 @@ async function verHistorico() {
   const corpo = execucoes.map((e) =>
     el("tr", { class: "clicavel", onclick: () => verExecucao(e.thread_id) }, [
       el("td", { text: e.inicio.replace("T", " ").slice(0, 16) }),
+      celulaThread(e),
       el("td", { class: "truncar", title: e.pedido || e.thread_id, text: e.pedido || "(sem pedido registrado)" }),
       el("td", {}, seloDesfecho(e.desfecho)),
       el("td", { class: "num", text: dur(e.wall_s) }),
@@ -204,12 +207,27 @@ async function verHistorico() {
     el("section", {}, [
       el("h2", { text: `${total} execuções` }),
       el("table", {}, [
-        el("thead", {}, el("tr", {}, ["quando", "pedido", "desfecho", "wall", "nós", "retrab.", "rodadas", "cob.", "tetos", "tokens", "cota"]
+        el("thead", {}, el("tr", {}, ["quando", "thread", "pedido", "desfecho", "wall", "nós", "retrab.", "rodadas", "cob.", "tetos", "tokens", "cota"]
           .map((t) => el("th", { text: t })))),
         el("tbody", {}, corpo),
       ]),
     ])
   );
+}
+
+// Id curto na célula, o completo no título (e em Ctrl+C: o texto da célula é
+// selecionável). Reexecução ganha a origem embaixo, para a bifurcação não
+// parecer uma execução independente.
+function celulaThread(e) {
+  const r = e.reexecucao;
+  const origem = r ? `↳ ${r.thread_origem.slice(0, 8)} @ ${r.a_partir_de}` : "";
+  return el("td", {
+    class: "id-thread",
+    title: r ? `${e.thread_id}\nreexecução de ${r.thread_origem} a partir de ${r.a_partir_de}` : e.thread_id,
+  }, [
+    el("code", { text: e.thread_id.slice(0, 8) }),
+    ...(origem ? [el("div", { class: "origem", text: origem })] : []),
+  ]);
 }
 
 // Tokens em milhares; execução anterior à medição (ou sem Codex) fica "—".
