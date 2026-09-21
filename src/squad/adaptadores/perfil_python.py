@@ -28,6 +28,23 @@ _PYTEST_ARGS = [
 # QA seria mandado escrever testes para um runner de testes. A lista é
 # conservadora e por nome convencional; a defesa principal é a instrução ao
 # executor para não criar esses scripts.
+def _e_teste(caminho: str) -> bool:
+    """Teste é o que o pytest trataria como teste, em qualquer pasta.
+
+    Só `tests/` deixava passar o `test_temperatura.py` que o Codex escreveu na
+    raiz (thread `055e0f17`): o arquivo não rodava — o pytest aponta para
+    `tests` — mas entrava na cobertura como código sem teste, a 0%, e a
+    primeira medição deu 31,8% em vez de 100%. O QA pagou uma passada extra
+    para "cobrir" um arquivo que era teste.
+    """
+    nome = caminho.rsplit("/", 1)[-1]
+    return (
+        caminho.startswith("tests/")
+        or nome == "conftest.py"
+        or (nome.endswith(".py") and (nome.startswith("test_") or nome.endswith("_test.py")))
+    )
+
+
 _COVERAGERC = """[run]
 omit =
     tests/*
@@ -38,6 +55,9 @@ omit =
     manage.py
     setup.py
     conftest.py
+    test_*.py
+    */test_*.py
+    *_test.py
 """
 
 _LIBS = "fastapi, flask, httpx, requests"
@@ -132,7 +152,7 @@ PERFIL = PerfilStack(
     ler_cobertura=_ler_cobertura,
     preparar_workspace=_preparar,
     permite_host=True,
-    e_teste=lambda caminho: caminho.startswith("tests/"),
+    e_teste=_e_teste,
     ignorar_no_workspace=frozenset(
         {"__pycache__", ".pytest_cache", ".ruff_cache", ".squad", ".git"}
     ),

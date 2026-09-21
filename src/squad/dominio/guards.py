@@ -179,3 +179,21 @@ def motivo_impasse_suite(saida_testes: str) -> str:
         "autorizar — o deploy só exige que a entrega compile.\n\n"
         f"Saída dos testes:\n{saida_testes[:1500]}"
     )
+
+
+# ---------- teste escrito pelo executor ----------
+
+def testes_do_executor(antes: set[str], depois: list[str], e_teste) -> list[str]:
+    """Arquivos de teste que surgiram durante a rodada de desenvolvimento.
+
+    Quem escreve a suíte é o QA; o executor recebe a proibição por escrito, e
+    nem todo executor obedece. Medido na thread `055e0f17`: o Codex criou um
+    `test_temperatura.py` na raiz, que entrou na cobertura como código sem
+    teste e custou uma passada extra do QA. Prompt é pedido; esta função é o
+    que o grafo usa para garantir a separação entre quem implementa e quem
+    valida, com qualquer executor.
+
+    Só arquivo NOVO conta: os testes do QA de rodadas anteriores já estavam
+    lá, e apagá-los destruiria a suíte que o laço está tentando satisfazer.
+    """
+    return sorted(a for a in depois if e_teste(a) and a not in antes)
