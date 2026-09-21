@@ -177,6 +177,10 @@ def detalhar(diretorio: Path, thread_id: str) -> dict | None:
         }
         if medido:
             item["chars_contexto"] = int(evento.get("chars_contexto") or 0)
+            # Por que a rodada ficou vermelha, gravado pelo nó de testes — a
+            # saída em si é sobrescrita pela rodada seguinte.
+            if evento.get("trecho_falha"):
+                item["trecho_falha"] = evento["trecho_falha"]
             barras.append(item)
             rodadas[-1]["duracao_s"] += item["duracao_s"]
             rodadas[-1]["chars_contexto"] += item["chars_contexto"]
