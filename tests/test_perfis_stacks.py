@@ -304,3 +304,31 @@ def test_relatorio_de_cobertura_nao_fica_na_raiz_do_mount():
     assert perfil.relatorio_cobertura.startswith(perfil_nextjs.SUBDIR_COBERTURA + "/")
     cmd = perfil.comando_container("/out")
     assert f"/out/{perfil_nextjs.SUBDIR_COBERTURA}" in cmd
+
+
+# ---------- moldura fora da cobertura e ambiente de testes ----------
+
+def test_nextjs_tira_a_moldura_do_app_router_da_cobertura():
+    """Calculadora de juros (thread `d4a926e5`): `app/layout.tsx` ficou a 0,0%
+    com a cobertura agregada em 91,2% e reprovou o piso por módulo sozinho —
+    é `<html>`, `<body>` e metadata, sem lógica para testar."""
+    config = perfil_nextjs._VITEST_CONFIG
+    assert '"**/layout.tsx"' in config and '"**/*.d.ts"' in config
+
+
+def test_toda_stack_declara_o_ambiente_de_testes():
+    """O guard de critérios só pode cobrar teste que dê para escrever com o
+    que a jaula oferece — e ele precisa saber o que é."""
+    for nome in perfis.nomes():
+        assert perfis.obter(nome).ambiente_testes, nome
+
+
+def test_nextjs_ensina_a_receita_de_interacao_que_roda_na_jaula():
+    """Sem a receita, o QA só testava a página de forma estática, e o guard
+    reprovou a suíte quatro vezes pedindo interação — que o jsdom da imagem
+    sempre permitiu. A receita foi validada na jaula antes de entrar aqui."""
+    instrucoes = perfis.obter("nextjs").instrucoes_qa
+    for trecho in ("// @vitest-environment jsdom", 'import { act } from \\"react\\"',
+                   "IS_REACT_ACT_ENVIRONMENT", "createRoot", '"submit"'):
+        assert trecho.replace('\\"', '"') in instrucoes, trecho
+    assert "jsdom" in perfis.obter("nextjs").ambiente_testes
