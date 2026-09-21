@@ -18,6 +18,8 @@ imprimir o aviso, levantar o erro.
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from . import vereditos
+
 # Orçamento de rodadas. `tentativas` é o teto geral, compartilhado; cada sinal
 # caro tem o seu, para não consumir sozinho o que é do pytest.
 MAX_TENTATIVAS = 3
@@ -121,7 +123,32 @@ def pos_desenvolvimento(state: Estado, e_teste=e_teste_padrao) -> Decisao:
             destino="executar_testes",
             aviso=f">>> Correção de {origem}: suíte preservada, indo direto ao pytest.",
         )
+    if origem == "testes" and tem_suite and _suite_foi_o_juiz(state):
+        return Decisao(
+            destino="executar_testes",
+            aviso=">>> Correção de teste vermelho: suíte preservada, indo direto ao pytest.",
+        )
     return Decisao(destino="escrever_testes")
+
+
+def _suite_foi_o_juiz(state: Estado) -> bool:
+    """A suíte rodou e julgou o código — então ela sobrevive à correção.
+
+    Reescrever a suíte a cada rodada nascida de teste vermelho era o maior
+    custo medido do grafo: na calculadora de juros (thread `00b92498`), três
+    passadas do QA somaram 52 dos 73 min de nós, e só a primeira escreveu algo
+    que faltava. O código mudou; a suíte precisa *rodar* de novo, não ser
+    *escrita* de novo — o mesmo argumento do item 29, que valia para revisão e
+    não tinha sido estendido ao pytest porque um teste errado não tinha rota de
+    volta ao QA. Agora tem: se a correção não mexer no código, a suíte
+    contestada volta ao QA (guards.destino_da_correcao_inerte).
+
+    Vale para asserção e para build quebrado. Import e coleta ficam de fora: aí
+    o teste costuma apontar para o que não existe, e quem conserta é o QA.
+    """
+    return bool(state.get("falha_de_build")) or vereditos.falha_de_assercao(
+        state.get("saida_testes", "")
+    )
 
 
 def pos_validacao_testes(state: Estado) -> Decisao:

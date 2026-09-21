@@ -76,3 +76,46 @@ def veredito_aprovado(texto: str) -> bool:
         if "APROVADO" in linha:
             return True
     return False
+
+
+# ---------- de que tipo é o vermelho da suíte ----------
+
+# Asserção que falhou: o teste rodou, comparou e discordou. O código pode estar
+# errado — e, às vezes, o próprio teste (expectativa errada, tolerância rígida
+# demais).
+_MARCAS_ASSERCAO = (
+    "AssertionError", "AssertionFailedError", "\nE       assert", "expected ",
+)
+# O teste nem chegou a comparar: import, sintaxe, tipo, coleta, nome indefinido.
+_MARCAS_AMBIENTE = (
+    "ModuleNotFoundError", "ImportError", "Cannot find module",
+    "Failed to resolve import", "SyntaxError", "error TS", "ERROR collecting",
+    "no tests ran", "No test files found", "COMPILATION ERROR", "NameError",
+    "ReferenceError", "is not defined",
+)
+
+
+def falha_de_assercao(saida: str) -> bool:
+    """O vermelho veio de uma asserção, e só dela."""
+    saida = saida or ""
+    return any(m in saida for m in _MARCAS_ASSERCAO) and not any(
+        m in saida for m in _MARCAS_AMBIENTE
+    )
+
+
+LIMITE_JUSTIFICATIVA = 800
+
+
+def justificativa(resposta: object) -> str:
+    """O que vem depois do veredito de uma resposta SIM/NAO.
+
+    O guard de critérios responde o veredito na primeira linha e, quando
+    reprova, lista o que falta nas seguintes. O veredito continua sendo lido
+    por `veredito_sim`, na primeira frase; isto aqui só recupera o resto, para
+    virar feedback acionável em vez de "reescreva tudo".
+    """
+    texto = str(resposta or "").strip()
+    primeira = _FIM_DE_FRASE.search(texto)
+    resto = texto[primeira.end():] if primeira else ""
+    # Só o separador sai: o hífen de uma lista é conteúdo, não pontuação.
+    return resto.lstrip(" \t\r\n:").rstrip()[:LIMITE_JUSTIFICATIVA]

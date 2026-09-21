@@ -29,7 +29,7 @@ from ..crews.planejamento import crew_planejamento
 from ..crews.qualidade import crew_revisao, crew_testes
 from ..deploy import executar_deploy
 from ..dominio import guards, nomes, orcamento, rotas
-from ..dominio.vereditos import veredito_aprovado, veredito_sim
+from ..dominio.vereditos import justificativa, veredito_aprovado, veredito_sim
 from ..llm import squad_llm
 from ..adaptadores import perfis
 from ..adaptadores.config_spring import medir_ambientes
@@ -731,6 +731,32 @@ def _correcao_inerte(
     raise RuntimeError(falha)
 
 
+def _feedback_para_qa(state: EstadoProjeto, perfil) -> str:
+    """O retorno que o QA recebe, em modo ajuste quando a suíte já existe.
+
+    O QA gravava a suíte inteira de novo a cada passada, mesmo quando o
+    retorno apontava um teste só. É o nó mais caro do grafo, e no gateway corporativo o custo cresce com o tamanho da resposta: com os arquivos inteiros
+    reenviados em cada chamada da ferramenta, cada passada levou de 6 a 23 min
+    na calculadora de juros. Com a suíte já no disco, a ordem é mexer só no
+    que o retorno aponta.
+    """
+    feedback = state.get("feedback_qa", "")
+    if not feedback:
+        return "Nenhum — primeira rodada."
+    suite = [a for a in state.get("arquivos", []) if perfil.e_teste(a)]
+    if not suite:
+        return feedback
+    return (
+        "MODO AJUSTE — a suíte já existe no disco: "
+        f"{', '.join(suite)}. Leia esses arquivos antes de agir e altere SÓ o "
+        "necessário para tratar o retorno abaixo: acrescente os testes que "
+        "faltam ou corrija os que estão errados, no arquivo em que eles "
+        "moram. NÃO regrave arquivo que não precisa mudar — reescrever a suíte "
+        "inteira é proibido nesta rodada.\n\n"
+        f"{feedback}"
+    )
+
+
 def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     perfil = _perfil(state)
     arquivos_antes = "\n".join(state.get("arquivos", []))
@@ -745,7 +771,7 @@ def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
                 **_do_perfil(perfil),
                 "spec": state["spec"],
                 "arquivos": arquivos_antes or "(workspace vazio)",
-                "feedback_qa": state.get("feedback_qa", "") or "Nenhum — primeira rodada.",
+                "feedback_qa": _feedback_para_qa(state, perfil),
             }
         ), caro=True)
     # Revarre o workspace: os testes agora fazem parte da entrega e entram
@@ -773,10 +799,12 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
     with medir(_tid(state, config), "validacao_testes") as m:
         m.update(chars_contexto=len(state["spec"][:6000]) + len(testes))
         veredito = com_retry("guard de critérios", lambda: squad_llm().call(
-            "Você é um verificador rigoroso de testes. Responda APENAS com a "
-            "palavra SIM ou NAO. Os testes abaixo verificam de fato os "
-            "critérios de aceite da especificação — cobrindo o comportamento "
-            "exigido, e não apenas asserções triviais ou detalhes irrelevantes?"
+            "Você é um verificador rigoroso de testes. Os testes abaixo "
+            "verificam de fato os critérios de aceite da especificação — "
+            "cobrindo o comportamento exigido, e não apenas asserções triviais "
+            "ou detalhes irrelevantes? Responda SIM ou NAO sozinho na primeira "
+            "linha. Se NAO, liste nas linhas seguintes, em até 5 itens curtos, "
+            "os critérios de aceite que a suíte não verifica."
             f"\n\nEspecificação:\n{state['spec'][:6000]}"
             f"\n\nTestes:\n{testes}"
         ))
@@ -785,15 +813,29 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
 
     if not aderentes:
         print(">>> Guard de critérios: testes não cobrem os critérios de aceite.")
-        return {
-            "testes_aderentes": False,
-            "feedback_qa": (
-                "Os testes escritos não verificam os critérios de aceite da "
-                "spec. Reescreva-os cobrindo o comportamento exigido, com "
-                "asserções sobre resultados reais — não asserções triviais."
-            ),
-        }
+        return {"testes_aderentes": False, "feedback_qa": _feedback_criterios(veredito)}
     return {"testes_aderentes": True, "feedback_qa": ""}
+
+
+def _feedback_criterios(veredito: object) -> str:
+    """O que o QA recebe quando o guard de critérios reprova.
+
+    Antes era "reescreva-os" e mais nada: o QA não sabia o que faltava e
+    reescrevia a suíte inteira às cegas — e o nó que escreve a suíte é o mais
+    caro do grafo. Com a lista do guard, ele complementa o que falta.
+    """
+    faltando = justificativa(veredito)
+    if not faltando:
+        return (
+            "Os testes escritos não verificam os critérios de aceite da spec. "
+            "Complemente-os cobrindo o comportamento exigido, com asserções "
+            "sobre resultados reais — não asserções triviais."
+        )
+    return (
+        "O verificador de critérios apontou o que a suíte NÃO verifica. "
+        "Acrescente testes para estes pontos, sem reescrever os que já estão "
+        f"certos:\n{faltando}"
+    )
 
 
 def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
