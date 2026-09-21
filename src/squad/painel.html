@@ -51,10 +51,15 @@
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
   th {
     text-align: left; font-weight: 600; color: var(--fraco); font-size: 11px;
-    letter-spacing: .06em; text-transform: uppercase; padding: 6px 10px 6px 0;
+    letter-spacing: .06em; text-transform: uppercase; padding: 6px 16px 6px 0;
     border-bottom: 1px solid var(--borda); white-space: nowrap;
   }
-  td { padding: 7px 10px 7px 0; border-bottom: 1px solid var(--borda); vertical-align: top; }
+  td { padding: 8px 16px 8px 0; border-bottom: 1px solid var(--borda); vertical-align: top; }
+  /* A última coluna encosta na borda da tabela; o respiro é entre colunas. */
+  th:last-child, td:last-child { padding-right: 0; }
+  /* Cabeçalho de coluna numérica alinhado com os valores, à direita: alinhado
+     à esquerda sobre números à direita, ele parecia colado no vizinho. */
+  th.num { text-align: right; }
   tbody tr.clicavel { cursor: pointer; }
   tbody tr.clicavel:hover td { background: var(--papel); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -63,8 +68,10 @@
      o pedido, que já trunca com reticências e mostra o texto inteiro no title. */
   td.quando, td.num, td.curta, td.id-thread { white-space: nowrap; }
   td.quando { font-variant-numeric: tabular-nums; }
+  /* Tetos é lista: quebra entre itens, numa coluna de largura contida. */
+  td.tetos { max-width: 130px; }
   .truncar { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  td.truncar { width: 100%; max-width: 0; min-width: 140px; }
+  td.truncar { width: 100%; max-width: 0; min-width: 100px; }
   .id-thread code { font-size: 12px; user-select: all; }
   .id-thread .origem { font-size: 11px; color: var(--fraco); white-space: nowrap; }
 
@@ -283,14 +290,14 @@ async function verHistorico() {
         el("td", { class: "num", text: e.tempo_nos_s ? `${pct(e.retrabalho_s, e.tempo_nos_s)}%` : "—" }),
         el("td", { class: "num", text: e.rodadas }),
         el("td", { class: "num", text: e.cobertura == null ? "—" : `${e.cobertura}%` }),
-        el("td", { class: "curta", text: e.tetos.join(", ") || "—" }),
+        el("td", { class: "tetos", text: [...new Set(e.tetos)].join(", ") || "—" }),
         el("td", { class: "num", text: mil(e.tokens) }),
         el("td", { class: "num", text: e.cota_pts == null ? "—" : `+${e.cota_pts}` }),
       ])
     );
     tabela.replaceChildren(el("div", { class: "rolagem" }, el("table", {}, [
       el("thead", {}, el("tr", {}, ["quando", "thread", "pedido", "desfecho", "wall", "nós", "retrab.", "rodadas", "cob.", "tetos", "tokens", "cota"]
-        .map((t) => el("th", { text: t })))),
+        .map(cabecalho))),
       el("tbody", {}, corpo),
     ])));
 
@@ -324,15 +331,21 @@ async function verHistorico() {
 // parecer uma execução independente.
 function celulaThread(e) {
   const r = e.reexecucao;
-  const origem = r ? `↳ ${r.thread_origem.slice(0, 8)} @ ${r.a_partir_de}` : "";
+  // Duas linhas curtas em vez de uma longa: a origem numa linha só dobrava a
+  // largura da coluna para todas as execuções.
+  const origem = r ? [`↳ ${r.thread_origem.slice(0, 8)}`, `@ ${r.a_partir_de}`] : [];
   return el("td", {
     class: "id-thread",
     title: r ? `${e.thread_id}\nreexecução de ${r.thread_origem} a partir de ${r.a_partir_de}` : e.thread_id,
   }, [
     el("code", { text: e.thread_id.slice(0, 8) }),
-    ...(origem ? [el("div", { class: "origem", text: origem })] : []),
+    ...origem.map((linha) => el("div", { class: "origem", text: linha })),
   ]);
 }
+
+// Cabeçalho de tabela; o das colunas numéricas alinha à direita, com os valores.
+const COLUNAS_NUMERICAS = new Set(["wall", "nós", "retrab.", "rodadas", "cob.", "tokens", "cota", "tempo", "share", "contexto"]);
+const cabecalho = (t) => el("th", { text: t, ...(COLUNAS_NUMERICAS.has(t) ? { class: "num" } : {}) });
 
 // Tokens em milhares; execução anterior à medição (ou sem Codex) fica "—".
 const mil = (n) => (n ? `${(n / 1000).toFixed(0)}k` : "—");
@@ -489,7 +502,7 @@ function reparticao(d) {
     barra,
     el("table", { style: "margin-top:12px" }, [
       el("thead", {}, el("tr", {}, ["fatia", "origem", "tempo", "share", "contexto", "tokens"]
-        .map((t) => el("th", { text: t })))),
+        .map(cabecalho))),
       el("tbody", {}, linhas),
     ]),
   ]);
