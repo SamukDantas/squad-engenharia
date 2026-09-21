@@ -1135,12 +1135,14 @@ def no_veredito_do_ramo(state: EstadoProjeto) -> EstadoProjeto:
 
 # ---------- montagem do grafo ----------
 
-def construir_subgrafo_servico(entrada: str = "triagem"):
+def construir_subgrafo_servico(entrada: str = "triagem", parar_depois: str | None = None):
     """O pipeline de um serviço, do pedido ao veredito.
 
     `entrada` é o primeiro nó. Fora da triagem, só a reexecução a partir de um
     nó usa (graph/reexecucao.py): o estado chega pronto, copiado do checkpoint
-    de outra thread.
+    de outra thread. `parar_depois` interrompe a execução logo depois de um nó
+    — é o `--ate` da reexecução, que valida uma correção sem pagar os nós
+    seguintes.
 
     É o grafo que sempre existiu, menos as duas pontas que deixaram de ser dele:
     o gate humano e o deploy subiram para o maestro. A razão é o paralelismo —
@@ -1180,7 +1182,7 @@ def construir_subgrafo_servico(entrada: str = "triagem"):
     g.add_conditional_edges("visual", rota_pos_visual)
     g.add_edge("aprovacao_humana", END)
 
-    return g.compile()
+    return g.compile(interrupt_after=[parar_depois] if parar_depois else None)
 
 
 def _checkpointer():
@@ -1200,7 +1202,7 @@ def _checkpointer():
     return SqliteSaver(conn)
 
 
-def construir_grafo(entrada: str = "triagem"):
+def construir_grafo(entrada: str = "triagem", parar_depois: str | None = None):
     """O maestro: o que é da execução inteira, não de um serviço.
 
     Hoje ele conduz um ramo só, e o resultado é igual ao de sempre. A forma é
@@ -1209,7 +1211,7 @@ def construir_grafo(entrada: str = "triagem"):
     """
     g = StateGraph(EstadoProjeto)
 
-    g.add_node("servico", construir_subgrafo_servico(entrada))
+    g.add_node("servico", construir_subgrafo_servico(entrada, parar_depois))
     g.add_node("aprovacao_humana", no_aprovacao_humana)
     g.add_node("deploy", no_deploy)
 

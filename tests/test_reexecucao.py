@@ -94,3 +94,13 @@ def test_copia_leva_o_run_json_e_deixa_o_git():
     fora = reexecucao.pastas_fora_da_copia({"node_modules", ".next", ".squad"})
     assert ".squad" not in fora
     assert {"node_modules", ".next", ".git"} <= fora
+
+
+def test_ate_para_logo_depois_do_no():
+    """`--ate`: validar uma correção do QA custa a passada do QA e a suíte,
+    sem desenvolvimento, revisão nem visual. Medido: bifurcar a `3842268c`
+    em `executar_testes --ate executar_testes` rodou só a suíte, +0 pts."""
+    from src.squad.graph import workflow
+    parado = workflow.construir_subgrafo_servico("escrever_testes", "executar_testes")
+    assert list(parado.interrupt_after_nodes) == ["executar_testes"]
+    assert not workflow.construir_subgrafo_servico("escrever_testes").interrupt_after_nodes

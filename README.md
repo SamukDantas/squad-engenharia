@@ -124,6 +124,17 @@ daquele nó (a última vez que ele foi o próximo passo) e roda dali em diante,
 com workspace e métricas próprios. A thread de origem não muda. No painel, a
 reexecução aparece com a origem embaixo do id (`↳ 35d3bceb @ visual`).
 
+Para parar logo depois do juiz que interessa, sem pagar os nós seguintes:
+
+```bash
+python main.py --thread <id> --a-partir-de escrever_testes --ate executar_testes
+```
+
+Assim, validar uma correção do QA custa a passada do QA, o guard de critérios
+e a suíte, sem desenvolvimento, revisão nem visual. A execução termina com o
+desfecho `parcial` e continua retomável com `--thread <id novo>`. É o caminho
+padrão para validar correção: não reexecute o pedido do zero.
+
 Nós aceitos: `planejamento`, `validacao_spec`, `desenvolvimento`,
 `escrever_testes`, `validacao_testes`, `executar_testes`, `config_ambientes`,
 `revisao`, `pentest` e `visual`.
