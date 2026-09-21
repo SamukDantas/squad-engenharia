@@ -110,6 +110,34 @@ e seguir ao deploy, retome a execução com o mesmo `thread_id` respondendo `sim
 A entrega fica em `workspace/<thread_id>/` — arquivos Python reais, testes em
 `tests/` e um README de execução.
 
+### Reexecutar a partir de um nó
+
+Para validar uma mudança num nó sem pagar o pedido inteiro, bifurque uma
+thread existente:
+
+```bash
+python main.py --thread <id> --a-partir-de escrever_testes
+```
+
+A squad cria uma **thread nova** com o estado da origem imediatamente antes
+daquele nó (a última vez que ele foi o próximo passo) e roda dali em diante,
+com workspace e métricas próprios. A thread de origem não muda. No painel, a
+reexecução aparece com a origem embaixo do id (`↳ 35d3bceb @ visual`).
+
+Nós aceitos: `planejamento`, `validacao_spec`, `desenvolvimento`,
+`escrever_testes`, `validacao_testes`, `executar_testes`, `config_ambientes`,
+`revisao`, `pentest` e `visual`.
+
+O disco não tem checkpoint: o workspace novo é a cópia do de origem **como
+está agora**, menos os arquivos que não existiam naquele ponto. Bifurcar em
+`escrever_testes` tira a suíte que o QA escreveu depois; arquivo alterado por
+uma rodada de correção posterior fica na versão mais recente. Thread paralela
+(`--paralelo`) ainda não pode ser bifurcada.
+
+A motivação é de custo: em 21/09, duas execuções completas usadas só para
+validar correções do QA gastaram 11 pontos da cota do Codex sem entregar
+nada (RESILIENCIA.md, item 39).
+
 O código gerado usa apenas a stdlib e as libs **pré-provisionadas** no
 `requirements.txt` (fastapi, flask, httpx, requests): não há `pip install`
 em runtime — import fora da lista quebra o pytest e vira reprova com stack
@@ -298,7 +326,8 @@ python -m src.squad.painel        # http://127.0.0.1:4949
 
 Três telas:
 
-- **Série de execuções** — uma linha por thread: wall-clock, share de retrabalho,
+- **Série de execuções** — uma linha por thread, com o id curto (o completo no
+  título; reexecução mostra a origem): wall-clock, share de retrabalho,
   rodadas, cobertura final, desfecho e tetos atingidos. É a tela que responde
   "a mudança melhorou?", comparando execuções em vez de descrever uma.
 - **Linha do tempo** — uma faixa por nó no eixo do tempo real, colorida pelo
