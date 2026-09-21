@@ -379,7 +379,9 @@ resposta do app-server, o marco simplesmente sai sem o campo.
 
 Read-only por construção, exceto a exclusão, que só move para a lixeira: o
 escritor único de `metrics/` continua sendo o `metricas.py`. Serve execução viva
-(atualiza sozinho a cada 3s) e histórico antigo pelo mesmo caminho, porque a
+(o detalhe atualiza sozinho a cada 3s; a tela inicial, a cada 5s com a aba
+visível e na hora em que você volta para ela, então uma execução disparada no
+terminal aparece sem recarregar) e histórico antigo pelo mesmo caminho, porque a
 fonte é o disco e não o processo do grafo. Sobe só em `127.0.0.1` — não tem
 autenticação e expõe o pedido e os vereditos da execução. A exclusão exige o
 cabeçalho `X-Painel`, que outra página aberta no navegador não consegue mandar
