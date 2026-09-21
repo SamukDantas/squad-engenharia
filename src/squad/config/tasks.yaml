@@ -21,9 +21,26 @@ definir_arquitetura:
     A entrega será implementada na stack {stack}, usando apenas
     {libs_permitidas} — não proponha outras tecnologias.
     Limite a spec a no máximo 150 linhas, focando no essencial para implementar.
+
+    Separe a spec em DUAS seções com estes títulos exatos:
+    "## Requisitos" — só o que o pedido exige, com os critérios de aceite
+    dele. Cada item tem de ser rastreável a uma frase do pedido; o que não é,
+    não entra aqui.
+    "## Decisões de implementação" — como você sugere construir: estrutura
+    de arquivos, nomes, organização de estilos, padrões internos. São
+    sugestões para o desenvolvedor, não obrigações: a entrega pode seguir
+    outro caminho se ele cumprir os requisitos.
+    Duas proibições, porque já custaram execuções inteiras: NÃO inclua
+    arquivos de teste nem plano de testes na spec — a suíte é escrita por
+    outro agente e verificada por execução; e NÃO transforme uma escolha de
+    implementação em requisito (por exemplo, "nenhuma cor em CSS global",
+    quando o pedido só exige a página legível no tema escuro). As
+    verificações por execução — testes, verificação visual, pentest — têm
+    precedência sobre qualquer decisão de implementação desta spec.
   expected_output: >
     Spec técnica enxuta (máx. 150 linhas) em markdown, estritamente sobre
-    "{pedido}", pronta para orientar a implementação.
+    "{pedido}", com as seções "## Requisitos" e "## Decisões de
+    implementação", pronta para orientar a implementação.
   agent: arquiteto
 
 # --- Crew de desenvolvimento (sequencial: backend -> frontend -> consolidação) ---
@@ -107,12 +124,21 @@ revisar:
     tem um critério estreito. Só é BLOQUEANTE o apontamento que se encaixa em
     um destes três casos: (a) defeito que quebra comportamento documentado na
     spec ou no README da entrega, (b) falha de segurança explorável, (c)
-    violação direta de um requisito da spec. Todo o resto — preferência de
-    estilo, refatoração, hardening defensivo, tratamento de erro que a spec
-    não exige, melhoria "opcional" — vai numa seção final
+    violação direta de um requisito do PEDIDO ORIGINAL (abaixo) ou da seção
+    "## Requisitos" da spec. Todo o resto — preferência de estilo,
+    refatoração, hardening defensivo, tratamento de erro que a spec não
+    exige, melhoria "opcional" — vai numa seção final
     "## Sugestões (não bloqueantes)" e NÃO afeta o veredito. Se você não tem
     nenhum apontamento bloqueante, o veredito é APROVADO, mesmo que a lista
     de sugestões seja longa.
+
+    Desviar da seção "## Decisões de implementação" da spec NÃO é
+    bloqueante: são sugestões do arquiteto, e a entrega pode ter seguido
+    outro caminho — muitas vezes porque uma verificação por execução
+    (testes, verificação visual) exigiu. Na dúvida sobre se um item é
+    requisito ou decisão, confira se ele é rastreável a uma frase do pedido
+    original; se não for, é sugestão. Exigir o contrário do que a verificação
+    visual ou os testes cobraram faz o laço oscilar sem convergir.
 
     A revisão da rodada anterior está abaixo. O código que você está lendo JÁ
     incorpora as correções que ela exigiu: não peça para desfazê-las. Se você
@@ -123,6 +149,7 @@ revisar:
 
     Conclua com o veredito exato APROVADO ou REPROVADO na última linha. Ao
     reprovar, liste antes do veredito apenas as correções bloqueantes.
+    Pedido original: {pedido}
     Revisão da rodada anterior: {revisao_anterior}
     Saída do {runner}: {saida_testes}
     Código (lido do workspace): {codigo}
