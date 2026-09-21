@@ -289,3 +289,21 @@ def pos_decomposicao(state: Estado) -> Decisao:
         destino="decomposicao",
         aviso=f">>> Decomposição inválida, refazendo: {state['erros_decomposicao']}",
     )
+
+
+# Nós que retomam sem falar com o provedor: o gate espera um humano, e o
+# deploy compila e publica. Uma thread parada ali não precisa de login.
+NOS_SEM_LLM = frozenset({"aprovacao_humana", "deploy", "gate", "deploy_servico"})
+
+
+def retomada_chama_llm(proximos) -> bool:
+    """Se o que falta de uma thread retomada passa por nó que fala com o provedor.
+
+    A checagem de credencial nasceu para uma execução não morrer no
+    planejamento com `Connection error` quando a sessão expirou. Aplicada a
+    toda retomada, ela barrava também a publicação de uma entrega já pronta,
+    parada no gate — onde não há chamada de LLM nenhuma: medido ao publicar a
+    thread `055e0f17`, com a sessão Keycloak expirada. Thread sem próximo nó
+    (já terminada) também não precisa.
+    """
+    return bool(proximos) and not set(proximos) <= NOS_SEM_LLM
