@@ -30,10 +30,10 @@ PROVEDORES = ("gateway", "zen", "codex")
 
 
 def provedor() -> str:
-    valor = (os.getenv("LLM_PROVEDOR") or "gateway").strip().lower()
+    valor = (os.getenv("LLM_PROVEDOR") or "codex").strip().lower()
     if valor not in PROVEDORES:
         raise ValueError(
-            f"LLM_PROVEDOR inválido: '{valor}'. Use 'gateway', 'zen' ou 'codex'."
+            f"LLM_PROVEDOR inválido: '{valor}'. Use 'codex', 'gateway' ou 'zen'."
         )
     return valor
 
@@ -170,7 +170,7 @@ class CodexLLM(BaseLLM):
 
 def _codex(model: str | None, **teto) -> LLM:
     return CodexLLM(
-        model=codex_cli.modelo() or "codex",
+        model=codex_cli.modelo(),
         timeout_s=int(teto.get("timeout") or _timeout()),
     )
 

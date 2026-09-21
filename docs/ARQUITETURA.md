@@ -120,7 +120,7 @@ sequenceDiagram
    qualquer LLM rodar; a entrega vive como arquivos, não como string no
    estado do grafo.
 2. **Executor de desenvolvimento intercambiável**: `DEV_EXECUTOR` escolhe
-   entre o OpenCode CLI (padrão), o Codex CLI e as crews CrewAI. A governança
+   entre o Codex CLI (padrão), o OpenCode CLI e as crews CrewAI. A governança
    é a mesma nos três casos — o grafo lê o disco, não o texto do executor. A
    tarefa é compartilhada (`adaptadores/tarefa_executor.py`) para a troca de
    executor medir o executor, e não a diferença entre dois prompts.
@@ -166,7 +166,7 @@ sequenceDiagram
    desenvolvimento (inicial, testes ou revisão) —, com resumo impresso ao
    final. Sem isso não há como saber se uma mudança melhorou o resultado.
 12. **Provedor de LLM intercambiável**: `LLM_PROVEDOR` escolhe entre o
-   Codex CLI (`codex`), o gateway gateway corporativo on-premise (`gateway`) e o
+   Codex CLI (`codex`, padrão), o gateway gateway corporativo on-premise (`gateway`) e o
    OpenCode Zen (`zen`), como `DEV_EXECUTOR` escolhe o executor — a
    governança do grafo não depende de quem responde. A configuração em uso é
    **Codex com `gpt-5.6-luna`** nos agentes e no executor: no mesmo pedido
