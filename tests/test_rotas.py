@@ -179,11 +179,11 @@ def test_verde_e_coberto_vai_aos_ambientes_antes_da_revisao():
 def test_stack_sem_exigencia_de_ambientes_passa_direto():
     """Python e Next.js chegam aqui sem o campo no estado. O nó existe sempre no
     grafo, e é o perfil que decide se ele tem algo a dizer."""
-    assert rotas.pos_config_ambientes(estado()).destino == "revisao"
+    assert rotas.pos_config_ambientes(estado()).destino == "visual"
 
 
-def test_ambientes_ok_segue_para_a_revisao():
-    assert rotas.pos_config_ambientes(estado(ambientes_ok=True)).destino == "revisao"
+def test_ambientes_ok_segue_para_a_verificacao_visual():
+    assert rotas.pos_config_ambientes(estado(ambientes_ok=True)).destino == "visual"
 
 
 def test_ambientes_reprovados_voltam_ao_desenvolvimento():
@@ -193,13 +193,13 @@ def test_ambientes_reprovados_voltam_ao_desenvolvimento():
     assert d.destino == "desenvolvimento"
 
 
-def test_teto_de_ambientes_segue_para_a_revisao_nao_para_o_gate():
+def test_teto_de_ambientes_segue_adiante_nao_para_o_gate():
     """Diferente de teste vermelho, configuração errada não invalida o
-    julgamento do revisor — e o achado fica no estado para o gate humano ver."""
+    julgamento dos juízes seguintes — e o achado fica no estado para o gate."""
     d = rotas.pos_config_ambientes(
         estado(ambientes_ok=False, ambientes_tentativas=rotas.MAX_AMBIENTES)
     )
-    assert d.destino == "revisao"
+    assert d.destino == "visual"
     assert d.teto == rotas.Teto("ambientes", rotas.MAX_AMBIENTES)
 
 
@@ -210,12 +210,21 @@ def test_revisao_aprovada_segue_ao_pentest_nao_ao_gate():
     assert rotas.pos_revisao(estado(aprovado=True)).destino == "pentest"
 
 
-def test_pentest_aprovado_segue_a_verificacao_visual():
-    assert rotas.pos_pentest(estado(pentest_ok=True)).destino == "visual"
+def test_pentest_aprovado_segue_ao_gate_humano():
+    """A verificação visual já falou antes da revisão (thread `af83302f`)."""
+    assert rotas.pos_pentest(estado(pentest_ok=True)).destino == "aprovacao_humana"
 
 
-def test_visual_aprovado_segue_ao_gate_humano():
-    assert rotas.pos_visual(estado(visual_ok=True)).destino == "aprovacao_humana"
+def test_visual_aprovado_segue_para_a_revisao():
+    """Visual antes da revisão: o juiz barato e sem token fala primeiro, e a
+    reprova dele não chega mais com o orçamento de correção esgotado."""
+    assert rotas.pos_visual(estado(visual_ok=True)).destino == "revisao"
+
+
+def test_teto_do_visual_segue_para_a_revisao_com_os_achados():
+    d = rotas.pos_visual(estado(visual_ok=False, visual_tentativas=MAX_VISUAL))
+    assert d.destino == "revisao"
+    assert d.teto == rotas.Teto("visual", MAX_VISUAL) and d.aviso
 
 
 def test_cada_sinal_caro_tem_teto_proprio():
@@ -226,8 +235,6 @@ def test_cada_sinal_caro_tem_teto_proprio():
          rotas.Teto("revisao", MAX_REVISOES)),
         (rotas.pos_pentest, {"pentest_ok": False, "pentest_tentativas": MAX_PENTEST},
          rotas.Teto("pentest", MAX_PENTEST)),
-        (rotas.pos_visual, {"visual_ok": False, "visual_tentativas": MAX_VISUAL},
-         rotas.Teto("visual", MAX_VISUAL)),
     ]
     for rota, campos, teto in casos:
         d = rota(estado(**campos))

@@ -7,7 +7,7 @@ usando **LangGraph** como orquestrador (estado, checkpoints, gates humanos) e
 ## Arquitetura
 
 ```
-Triagem → Planejamento → Guard aderência → Desenvolvimento → Testes → pytest → Revisão → Pentest → Visual → Aprovação humana → Deploy
+Triagem → Planejamento → Guard aderência → Desenvolvimento → Testes → pytest → Visual → Revisão → Pentest → Aprovação humana → Deploy
               ↑__↻ spec incoerente (máx. 2)_|   ↑___↻ testes vermelhos (máx. 3) / revisão reprovada (máx. 2) / vuln bloqueante (máx. 2) / contraste reprovado (máx. 2)___↻_|
 ```
 

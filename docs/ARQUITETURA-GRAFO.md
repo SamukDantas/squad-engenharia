@@ -81,9 +81,11 @@ flowchart TD
 | Testes escritos | `MAX_TESTES` | 2 | `validacao_testes`/`executar_testes` → `escrever_testes` (teto `escrever_testes`) |
 | Correção de código | `MAX_TENTATIVAS` | 3 | `executar_testes` → `aprovacao_humana` (teto `correcao`) |
 | Ambientes | `MAX_AMBIENTES` | 2 | `config_ambientes` → volta ao desenvolvimento |
-| Revisão, pentest, visual | `MAX_REVOES`, `MAX_PENTEST`, `MAX_VISUAL` | 2 cada | cada gate → `aprovacao_humana` com relatório |
+| Visual | `MAX_VISUAL` | 2 | `visual` → segue para a `revisao` com os achados no estado |
+| Revisão, pentest | `MAX_REVISOES`, `MAX_PENTEST` | 2 cada | cada gate → `aprovacao_humana` com relatório |
 | Deploy (maestro) | — | — | `gate` global (`no_gate`, "PLACAR DA EXECUÇÃO") bloqueia o `fan_out_deploy` |
 
-Nota: `revisao`, `pentest` e `visual` (nós dos tetos acima) são alcançados a
-partir de `config_ambientes` no pipeline completo; a figura acima os omite por
-concisão — todos seguem o mesmo padrão de gate → `aprovacao_humana`.
+Nota: depois de `config_ambientes`, a ordem é `visual` → `revisao` →
+`pentest` → `aprovacao_humana`. A verificação visual vem antes da revisão
+desde a thread `af83302f`: é o juiz mais barato (determinístico, sem token), e
+por último a reprova dela chegava com o orçamento de correção esgotado.

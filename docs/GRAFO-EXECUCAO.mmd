@@ -64,9 +64,9 @@ flowchart TD
         R_executar_testes -- "testes ok" --> R_config_ambientes
         R_executar_testes -- "tetô correção (3)" --> R_desenvolvimento
 
-        R_config_ambientes --> R_revisao
+        R_config_ambientes --> R_visual
+        R_visual --> R_revisao
         R_revisao --> R_pentest
-        R_pentest --> R_visual
-        R_visual --> R_aprovacao_humana
+        R_pentest --> R_aprovacao_humana
         R_aprovacao_humana --> R_end
     end
