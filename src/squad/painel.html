@@ -58,7 +58,13 @@
   tbody tr.clicavel { cursor: pointer; }
   tbody tr.clicavel:hover td { background: var(--papel); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  /* Data, números, selos e ids não quebram linha: numa tabela de 12 colunas o
+     navegador espremia "2026-09-21 14:29" em três linhas. Quem cede largura é
+     o pedido, que já trunca com reticências e mostra o texto inteiro no title. */
+  td.quando, td.num, td.curta, td.id-thread { white-space: nowrap; }
+  td.quando { font-variant-numeric: tabular-nums; }
   .truncar { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.truncar { width: 100%; max-width: 0; min-width: 140px; }
   .id-thread code { font-size: 12px; user-select: all; }
   .id-thread .origem { font-size: 11px; color: var(--fraco); white-space: nowrap; }
 
@@ -268,16 +274,16 @@ async function verHistorico() {
 
     const corpo = r.itens.map((e) =>
       el("tr", { class: "clicavel", onclick: () => verExecucao(e.thread_id) }, [
-        el("td", { text: e.inicio.replace("T", " ").slice(0, 16) }),
+        el("td", { class: "quando", title: e.inicio, text: e.inicio.replace("T", " ").slice(0, 16) }),
         celulaThread(e),
         el("td", { class: "truncar", title: e.pedido || e.thread_id, text: e.pedido || "(sem pedido registrado)" }),
-        el("td", {}, seloDesfecho(e.desfecho)),
+        el("td", { class: "curta" }, seloDesfecho(e.desfecho)),
         el("td", { class: "num", text: dur(e.wall_s) }),
         el("td", { class: "num", text: dur(e.tempo_nos_s) }),
         el("td", { class: "num", text: e.tempo_nos_s ? `${pct(e.retrabalho_s, e.tempo_nos_s)}%` : "—" }),
         el("td", { class: "num", text: e.rodadas }),
         el("td", { class: "num", text: e.cobertura == null ? "—" : `${e.cobertura}%` }),
-        el("td", { text: e.tetos.join(", ") || "—" }),
+        el("td", { class: "curta", text: e.tetos.join(", ") || "—" }),
         el("td", { class: "num", text: mil(e.tokens) }),
         el("td", { class: "num", text: e.cota_pts == null ? "—" : `+${e.cota_pts}` }),
       ])
