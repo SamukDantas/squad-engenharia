@@ -11,6 +11,7 @@ Ambos devolvem a mensagem de falha, ou `None` quando está tudo bem. Quem chama
 levanta — assim a decisão é testável sem `pytest.raises` e sem disco: o dado de
 entrada é um manifesto, não um caminho.
 """
+import re
 from typing import Callable, Mapping
 
 from .rotas import MAX_REVISOES_SUITE, e_teste_padrao
@@ -183,17 +184,45 @@ def motivo_impasse_suite(saida_testes: str) -> str:
 
 # ---------- teste escrito pelo executor ----------
 
-def testes_do_executor(antes: set[str], depois: list[str], e_teste) -> list[str]:
+def testes_do_executor(
+    antes: set[str], depois: list[str], e_teste, spec: str = ""
+) -> list[str]:
     """Arquivos de teste que surgiram durante a rodada de desenvolvimento.
 
-    Quem escreve a suíte é o QA; o executor recebe a proibição por escrito, e
-    nem todo executor obedece. Medido na thread `055e0f17`: o Codex criou um
-    `test_temperatura.py` na raiz, que entrou na cobertura como código sem
-    teste e custou uma passada extra do QA. Prompt é pedido; esta função é o
-    que o grafo usa para garantir a separação entre quem implementa e quem
-    valida, com qualquer executor.
+    Quem escreve a suíte é o QA, e o executor recebe a proibição por escrito.
+    Na thread `055e0f17` o Codex criou um `test_temperatura.py` na raiz, que
+    entrou na cobertura como código sem teste e custou uma passada extra do QA.
+    Prompt é pedido; esta função é o que o grafo usa para garantir a separação
+    entre quem implementa e quem valida, com qualquer executor.
 
     Só arquivo NOVO conta: os testes do QA de rodadas anteriores já estavam
     lá, e apagá-los destruiria a suíte que o laço está tentando satisfazer.
+
+    E só o que a spec NÃO pediu. Naquela mesma thread o arquivo não era
+    desobediência: a spec listava `test_temperatura.py` como parte da entrega,
+    e o QA escreveu um teste que o importava. Removê-lo quebrou a suíte (medido
+    ao limpar o repositório publicado) — e dentro do laço seria pior: a regra
+    apagaria o arquivo a cada rodada, a suíte ficaria vermelha, e nenhuma
+    correção do executor sobreviveria. Arquivo citado pelo nome na spec é
+    entrega, não rastro.
     """
-    return sorted(a for a in depois if e_teste(a) and a not in antes)
+    return sorted(
+        a for a in depois
+        if e_teste(a) and a not in antes and not _citado_na_spec(a, spec)
+    )
+
+
+def _citado_na_spec(caminho: str, spec: str) -> bool:
+    """O caminho, ou o nome do arquivo, aparece na spec como palavra inteira.
+
+    Pelo nome e não só pelo caminho: a spec costuma dizer `test_temperatura.py`
+    sem pasta. Fronteira de palavra para `test_a.py` não casar dentro de
+    `test_abc.py`.
+    """
+    if not spec:
+        return False
+    nome = caminho.rsplit("/", 1)[-1]
+    return any(
+        re.search(rf"(?<![\w./-]){re.escape(alvo)}(?![\w-])", spec)
+        for alvo in {caminho, nome}
+    )

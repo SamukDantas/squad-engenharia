@@ -683,9 +683,13 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
 
 
 def _remover_testes_do_executor(state: EstadoProjeto, antes: set[str], perfil) -> None:
-    """Apaga os testes que o executor criou (guards.testes_do_executor)."""
+    """Apaga os testes que o executor criou sem a spec pedir
+    (guards.testes_do_executor)."""
     raiz = Path(state["workspace"])
-    novos = guards.testes_do_executor(antes, _arquivos_do_workspace(raiz, perfil), perfil.e_teste)
+    novos = guards.testes_do_executor(
+        antes, _arquivos_do_workspace(raiz, perfil), perfil.e_teste,
+        spec=state.get("spec", ""),
+    )
     if not novos:
         return
     for rel in novos:
