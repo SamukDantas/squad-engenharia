@@ -22,12 +22,12 @@ truststore.inject_into_ssl()
 
 load_dotenv(override=True)
 
-from src.squad.adaptadores import perfis  # noqa: E402
+from src.squad.adaptadores import codex_cli, perfis  # noqa: E402
 from src.squad.adaptadores.metricas_json import eventos, registrar, resumo  # noqa: E402
 from src.squad.dominio.rotas import retomada_chama_llm  # noqa: E402
 from src.squad.graph.maestro import construir_maestro  # noqa: E402
 from src.squad.graph.workflow import DeployNegado, construir_grafo  # noqa: E402
-from src.squad.llm import conferir_credencial  # noqa: E402
+from src.squad.llm import conferir_credencial, provedor  # noqa: E402
 
 
 def _foi_paralela(thread_id: str) -> bool:
@@ -55,6 +55,30 @@ def _destino_deploy(estado) -> str:
         return ""
     visibilidade = (os.getenv("DEPLOY_VISIBILIDADE") or "private").strip().lower()
     return f"{dono}/{nome} ({visibilidade})"
+
+
+def _cota() -> dict:
+    """A cota do Codex para gravar num marco, quando a squad usa o Codex.
+
+    Lida nos marcos (início, retomada, fim) e não por nó: o servidor devolve o
+    percentual inteiro, e o gasto de um nó cabe dentro de um ponto. A
+    diferença entre o primeiro e o último marco é o gasto da execução
+    (`metricas_json.gasto_da_cota`); o gasto por nó fica com os tokens.
+
+    Nunca levanta: também roda no `except` que registra a queda, e lá um erro
+    aqui esconderia o erro que se quer registrar.
+    """
+    try:
+        usa_codex = (
+            provedor() == "codex"
+            or os.getenv("DEV_EXECUTOR", "codex").strip().lower() == "codex"
+        )
+    except ValueError:
+        return {}
+    if not usa_codex:
+        return {}
+    lida = codex_cli.cota()
+    return {"cota_codex": lida} if lida else {}
 
 
 def _exigir_credencial() -> None:
@@ -101,7 +125,7 @@ def main() -> None:
         # Uma thread pode atravessar vários processos. Sem este marco, a única
         # pista de retomada é uma lacuna no relógio entre dois eventos — que
         # também é o que uma chamada lenta ao provedor parece.
-        registrar(thread_id, "retomada")
+        registrar(thread_id, "retomada", **_cota())
         entrada = None  # None = continuar de onde parou
     else:
         # Execução nova sempre começa por LLM (planejamento). Conferido antes de
@@ -119,7 +143,7 @@ def main() -> None:
         entrada = {"pedido": pedido, "stack": perfil.nome, "thread_id": thread_id}
         registrar(
             thread_id, "inicio_execucao",
-            pedido=pedido, stack=perfil.nome, paralelo=paralelo,
+            pedido=pedido, stack=perfil.nome, paralelo=paralelo, **_cota(),
         )
         if paralelo:
             print("Modo paralelo: o pedido será decomposto em microsserviços.")
@@ -153,6 +177,7 @@ def main() -> None:
                 registrar(
                     thread_id, "fim_execucao", desfecho="aguardando_gate",
                     motivo="processo sem entrada interativa no gate humano",
+                    **_cota(),
                 )
                 print("\nSem entrada interativa para responder ao gate.")
                 print("Nada foi publicado — o trabalho está salvo e aprovado.")
@@ -164,7 +189,7 @@ def main() -> None:
         # Recusa é decisão, não falha: gravar como `erro` faria a thread parecer,
         # no histórico, igual a uma que caiu no meio — e contaminaria qualquer
         # leitura de taxa de conclusão.
-        registrar(thread_id, "fim_execucao", desfecho="negado", motivo=str(e))
+        registrar(thread_id, "fim_execucao", desfecho="negado", motivo=str(e), **_cota())
         print(f"\nDeploy recusado no gate: {e}")
         print(f"Nada foi publicado. Para reabrir a decisão: python main.py --thread {thread_id}")
         raise SystemExit(1)
@@ -173,6 +198,7 @@ def main() -> None:
             thread_id, "fim_execucao",
             desfecho="erro",
             erro=f"{type(e).__name__}: {e}"[:300],
+            **_cota(),
         )
         print(f"\nExecução interrompida: {e}")
         print(f"Progresso salvo. Retome com: python main.py --thread {thread_id}")
@@ -183,6 +209,7 @@ def main() -> None:
         thread_id, "fim_execucao",
         desfecho="deploy" if final.get("deploy_ok") else "sem_deploy",
         deploy_ref=final.get("deploy_ref", ""),
+        **_cota(),
     )
     print("\nDeploy ok:", final.get("deploy_ok", False))
     if final.get("deploy_ref"):

@@ -194,6 +194,8 @@ async function verHistorico() {
       el("td", { class: "num", text: e.rodadas }),
       el("td", { class: "num", text: e.cobertura == null ? "—" : `${e.cobertura}%` }),
       el("td", { text: e.tetos.join(", ") || "—" }),
+      el("td", { class: "num", text: mil(e.tokens) }),
+      el("td", { class: "num", text: e.cota_pts == null ? "—" : `+${e.cota_pts}` }),
     ])
   );
 
@@ -202,13 +204,16 @@ async function verHistorico() {
     el("section", {}, [
       el("h2", { text: `${total} execuções` }),
       el("table", {}, [
-        el("thead", {}, el("tr", {}, ["quando", "pedido", "desfecho", "wall", "nós", "retrab.", "rodadas", "cob.", "tetos"]
+        el("thead", {}, el("tr", {}, ["quando", "pedido", "desfecho", "wall", "nós", "retrab.", "rodadas", "cob.", "tetos", "tokens", "cota"]
           .map((t) => el("th", { text: t })))),
         el("tbody", {}, corpo),
       ]),
     ])
   );
 }
+
+// Tokens em milhares; execução anterior à medição (ou sem Codex) fica "—".
+const mil = (n) => (n ? `${(n / 1000).toFixed(0)}k` : "—");
 
 const cartao = (rotulo, valor) =>
   el("div", { class: "cartao" }, [
@@ -237,6 +242,8 @@ async function verExecucao(threadId) {
       cartao("Retrabalho", `${pct(d.retrabalho_s, d.tempo_nos_s)}%`),
       cartao("Rodadas", d.rodadas.length - 1),
       cartao("Contexto ao LLM", d.chars_contexto ? `${(d.chars_contexto / 1000).toFixed(0)}k` : "—"),
+      cartao("Tokens", mil(d.tokens)),
+      cartao("Cota Codex", d.cota ? `+${d.cota.gasto_pct} pts (${d.cota.antes}% → ${d.cota.depois}%)` : "—"),
     ]),
   ]);
 
@@ -352,13 +359,14 @@ function reparticao(d) {
       el("td", { class: "num", text: dur(r.duracao_s) }),
       el("td", { class: "num", text: `${pct(r.duracao_s, total)}%` }),
       el("td", { class: "num", text: r.chars_contexto ? `${(r.chars_contexto / 1000).toFixed(0)}k` : "—" }),
+      el("td", { class: "num", text: mil(r.tokens) }),
     ])
   );
 
   return el("div", {}, [
     barra,
     el("table", { style: "margin-top:12px" }, [
-      el("thead", {}, el("tr", {}, ["fatia", "origem", "tempo", "share", "contexto"]
+      el("thead", {}, el("tr", {}, ["fatia", "origem", "tempo", "share", "contexto", "tokens"]
         .map((t) => el("th", { text: t })))),
       el("tbody", {}, linhas),
     ]),

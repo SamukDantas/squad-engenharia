@@ -72,7 +72,7 @@ squad-engenharia/
     │   ├── agents.yaml         # definição dos agentes (papéis, goals, backstories)
     │   └── tasks.yaml          # definição das tarefas de cada crew
     ├── portas/                 # as formas: perfil de stack, testes, executor, métricas
-    ├── adaptadores/            # implementações: perfil python, runner de testes, opencode, codex, métricas
+    ├── adaptadores/            # implementações: perfil python, runner de testes, opencode, codex, métricas, consumo
     │   ├── tarefa_executor.py  # a tarefa que todo executor recebe (texto e .squad/tarefa.md)
     │   └── keycloak_token.py   # token do gateway corporativo: lê e renova o login do OpenCode
     ├── dominio/                # as decisões, sem nenhuma tecnologia
@@ -306,6 +306,26 @@ Três telas:
   dos nós: gate humano, queda do provedor, retomada manual.
 - **Repartição por rodada** — quanto do tempo foi trabalho novo e quanto foi
   retrabalho, separado pela origem que cobrou a rodada (testes, revisão, pentest).
+
+### Consumo da cota do Codex
+
+Com o Codex, cada execução também registra quanto gastou da conta ChatGPT, em
+duas medidas complementares:
+
+- **Tokens por nó** (`tokens` no evento do nó): somados do `turn.completed`
+  de cada `codex exec`, com entrada, entrada em cache, saída e número de
+  chamadas. Aparecem no resumo, na coluna "tokens" das telas e por rodada.
+- **Cota da conta nos marcos** (`cota_codex` em `inicio_execucao`, `retomada`
+  e `fim_execucao`): o percentual usado da janela, o plano e quando a janela
+  zera, lidos pelo `codex app-server` **sem chamar modelo** — ler a cota não
+  gasta cota. A diferença entre o primeiro e o último marco é o gasto da
+  execução ("+5 pts"), no resumo e no cartão "Cota Codex".
+
+A cota é lida só nos marcos porque o servidor devolve o percentual inteiro, e
+o gasto de um nó cabe dentro de um ponto. Ela é da **conta**: uso do Codex
+fora da squad na mesma janela entra na diferença. Se a janela zerar no meio da
+execução, a diferença não é reportada. A leitura nunca derruba a execução: sem
+resposta do app-server, o marco simplesmente sai sem o campo.
 
 Read-only por construção: o escritor único de `metrics/` continua sendo o
 `metricas.py`, e o painel só abre arquivo para leitura. Serve execução viva
