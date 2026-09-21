@@ -368,10 +368,23 @@ def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         )
     else:
         feedback = ""
+    revisoes = state.get("revisoes_suite", 0)
+    contestada = (
+        not resultado.testes_ok
+        and not resultado.falha_de_build
+        and state.get("origem_feedback") == "testes"
+        and revisoes < rotas.MAX_REVISOES_SUITE
+        and guards.falha_repetida(state.get("saida_testes", ""), saida)
+    )
+    if contestada:
+        feedback = guards.brief_falha_repetida(saida)
+        registrar(thread_id, "suite_contestada", testes=sorted(guards.testes_que_falharam(saida)))
     return {
         **campos,
         "cobertura_ok": cobertura_ok,
         "falha_de_build": resultado.falha_de_build,
+        "suite_contestada": contestada,
+        "revisoes_suite": revisoes + 1 if contestada else revisoes,
         "feedback_qa": feedback,
         # Rodada movida por execução: se voltar ao desenvolvimento, a suíte é
         # reescrita (o veredito veio dela).
@@ -655,27 +668,29 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         _tid(state, config), "desenvolvimento", executor=executor, origem=origem
     ) as m:
         m.update(chars_contexto=len(state["spec"]) + len(feedback))
-        if executor == "opencode":
-            executar_opencode(
-                state["workspace"], state["spec"], feedback, perfil
-            )
-        elif executor == "codex":
-            executar_codex(
-                state["workspace"], state["spec"], feedback, perfil
-            )
-        elif executor == "crews":
-            crew_desenvolvimento(state["workspace"]).kickoff(
-                inputs={
-                    **_do_perfil(perfil),
-                    "spec": state["spec"],
-                    "feedback_qa": feedback or "Nenhum — primeira rodada.",
-                }
-            )
-        else:
-            raise ValueError(
-                f"DEV_EXECUTOR inválido: '{executor}'. Use 'codex', 'opencode' "
-                "ou 'crews'."
-            )
+
+        def rodar(retorno: str) -> None:
+            if executor == "opencode":
+                executar_opencode(state["workspace"], state["spec"], retorno, perfil)
+            elif executor == "codex":
+                executar_codex(state["workspace"], state["spec"], retorno, perfil)
+            elif executor == "crews":
+                crew_desenvolvimento(state["workspace"]).kickoff(
+                    inputs={
+                        **_do_perfil(perfil),
+                        "spec": state["spec"],
+                        "feedback_qa": retorno or "Nenhum — primeira rodada.",
+                    }
+                )
+            else:
+                raise ValueError(
+                    f"DEV_EXECUTOR inválido: '{executor}'. Use 'codex', 'opencode' "
+                    "ou 'crews'."
+                )
+
+        rodar(feedback)
+        if executor in {"codex", "opencode"}:
+            m.update(_compilar_com_ajuste(state, perfil, rodar, feedback, _tid(state, config)))
     _remover_testes_do_executor(state, testes_antes, perfil)
     # O que vale é o que está no disco: o manifesto do estado vem de uma
     # varredura determinística do workspace, não do texto do executor.
@@ -694,6 +709,55 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         "testes_tentativas": 0,
         **extra,
     }
+
+
+MAX_AJUSTES_BUILD = 2
+
+
+def _compilar_com_ajuste(state: EstadoProjeto, perfil, rodar, feedback: str, tid: str) -> dict:
+    """Compila a entrega antes de ela sair do nó, e devolve o erro ao executor.
+
+    O executor escreve às cegas: roda no host, sem as dependências da jaula,
+    e nunca vê o compilador. Um erro de build só aparecia depois de QA, guard
+    de critérios e suíte — e custava uma rodada inteira, com o QA reescrevendo
+    a suíte para o código corrigido. Medido na thread `f96bb730`: um
+    `:global(*)` num CSS Module derrubou o `next build` na primeira rodada.
+    Aqui o ajuste custa um build na jaula e uma chamada ao executor.
+
+    Só com a jaula Docker (o padrão): `verificar_compilacao` é a mesma que
+    confere a entrega antes do push.
+    """
+    runner = (os.getenv("TEST_RUNNER") or "docker").strip().lower()
+    if runner != "docker" or not perfil.comando_verificacao:
+        return {}
+    for ajuste in range(MAX_AJUSTES_BUILD + 1):
+        falha = verificar_compilacao(state["workspace"], tid, perfil)
+        if not falha:
+            return {"build_ok": True, "ajustes_build": ajuste}
+        if ajuste == MAX_AJUSTES_BUILD:
+            break
+        print(f">>> A entrega não compila — ajuste {ajuste + 1} do executor antes do QA.")
+        rodar(_feedback_build(falha, feedback))
+    # Teto atingido: segue para o QA e a suíte, que reprovam com o mesmo erro e
+    # levam a rodada ao laço normal de correção.
+    return {
+        "build_ok": False,
+        "ajustes_build": MAX_AJUSTES_BUILD,
+        "trecho_falha": trecho_da_falha(falha),
+    }
+
+
+def _feedback_build(falha: str, feedback: str) -> str:
+    """O retorno do ajuste de build: o erro do compilador, e o retorno da
+    rodada, que continua valendo."""
+    texto = (
+        "A entrega NÃO COMPILA. Corrija o erro de build abaixo sem mudar o "
+        "comportamento já implementado:\n"
+        f"{trecho_da_falha(falha)}"
+    )
+    if feedback:
+        texto += f"\n\nRetorno desta rodada, que continua valendo:\n{feedback}"
+    return texto
 
 
 def _remover_testes_do_executor(state: EstadoProjeto, antes: set[str], perfil) -> None:
@@ -868,6 +932,15 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
             "Ambiente de testes disponível: "
             f"{_perfil(state).ambiente_testes or 'o runner da stack'}. Só "
             "aponte como faltando o que dá para testar com ele. "
+            "Cobertura é por comportamento, não por valor: uma asserção "
+            "representativa sobre o valor real basta (uma linha de tabela "
+            "conferida com os números cobre a tabela; um caso de erro "
+            "conferido cobre aquela recusa). Não exija conferir cada linha, "
+            "cada mês ou cada combinação de um comportamento já verificado. "
+            "Aparência também não é critério desta pergunta: layout "
+            "(\"lado a lado\", posição, tamanho), cores, contraste e "
+            "legibilidade nos temas são medidos pela verificação visual, que "
+            "renderiza a página num navegador — não exija teste deles. "
             "Responda SIM ou NAO sozinho na primeira linha. Se NAO, liste nas "
             "linhas seguintes, em até 5 itens curtos, os comportamentos "
             "exigidos que a suíte não verifica."

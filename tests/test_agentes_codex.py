@@ -180,3 +180,12 @@ def test_guard_de_criterios_recebe_o_ambiente_de_testes():
     import inspect
     fonte = inspect.getsource(workflow.no_validacao_testes)
     assert "ambiente_testes" in fonte and "Só " in fonte
+
+
+def test_guard_de_criterios_aceita_assercao_representativa():
+    """Thread `d1b5175b`: a segunda reprova do guard pedia conferir "as linhas
+    intermediárias" da tabela, com uma linha já conferida — e bateu o teto
+    de escrita da suíte."""
+    import inspect
+    fonte = inspect.getsource(workflow.no_validacao_testes)
+    assert "Cobertura é por comportamento, não por valor" in fonte

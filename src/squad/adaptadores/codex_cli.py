@@ -123,8 +123,17 @@ def _falha_no_stream(saida: str) -> str | None:
     que evita repetir o caça-frases que o adaptador do OpenCode precisa fazer.
     Linha que não é JSON é ignorada: o stream é para máquina, mas o CLI ainda
     imprime coisa para humano no meio.
+
+    Um `error` seguido de `turn.completed` foi recuperado pelo próprio Codex:
+    é o aviso de reconexão ("Reconnecting... 2/5"), que ele emite como `error`
+    e então tenta de novo. Medido na thread `f96bb730`: uma falha de DNS
+    passageira, o Codex reconectou e concluiu com exit 0, e este guard abortou
+    a execução inteira por causa do aviso. Só `turn.failed`, ou `error` sem
+    turno concluído, é morte.
     """
-    motivos: list[str] = []
+    falhas: list[str] = []
+    avisos: list[str] = []
+    concluiu = False
     for linha in saida.splitlines():
         linha = linha.strip()
         if not linha.startswith("{"):
@@ -136,9 +145,12 @@ def _falha_no_stream(saida: str) -> str | None:
         tipo = evento.get("type")
         if tipo == "turn.failed":
             erro = evento.get("error") or {}
-            motivos.append(str(erro.get("message") or erro or "turn.failed"))
+            falhas.append(str(erro.get("message") or erro or "turn.failed"))
         elif tipo == "error":
-            motivos.append(str(evento.get("message") or "error"))
+            avisos.append(str(evento.get("message") or "error"))
+        elif tipo == "turn.completed":
+            concluiu = True
+    motivos = falhas + ([] if concluiu else avisos)
     return "; ".join(motivos)[:500] or None
 
 

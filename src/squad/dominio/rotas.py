@@ -168,6 +168,18 @@ def pos_validacao_testes(state: Estado) -> Decisao:
 
 def pos_testes(state: Estado) -> Decisao:
     if not state.get("testes_ok"):
+        # A mesma asserção sobreviveu a uma correção: o teste é o suspeito, e
+        # outra rodada de desenvolvimento só repetiria a tentativa
+        # (guards.falha_repetida). Vai ao QA mesmo com o orçamento de correção
+        # no fim: a revisão da suíte não gasta rodada de desenvolvimento.
+        if state.get("suite_contestada"):
+            return Decisao(
+                destino="escrever_testes",
+                aviso=(
+                    ">>> Os mesmos testes falharam antes e depois da correção: "
+                    "a suíte volta ao QA para revisão."
+                ),
+            )
         if state["tentativas"] >= MAX_TENTATIVAS:
             # Circuit breaker: humano decide o que fazer com o trabalho reprovado.
             return Decisao(

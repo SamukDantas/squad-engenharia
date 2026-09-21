@@ -15,8 +15,9 @@ defeitos dela (20–21); a correção seguinte encontrou os defeitos de si mesma
 parser do veredito contrariava a lição que ele implementava (24). O padrão é o
 próprio método — cada volta só apareceu porque a anterior foi executada e
 observada, não argumentada. Os itens 35–37 vieram das execuções em
-setembro/2026 com o gateway corporativo, e o 38 compara esse provedor com o
-Codex CLI no mesmo pedido.
+setembro/2026 com o gateway corporativo, o 38 compara esse provedor com o
+Codex CLI no mesmo pedido, e o 39 é o que faltava para esse pedido sair numa
+rodada só.
 
 ---
 
@@ -1339,6 +1340,73 @@ reação seria mexer em tetos e guards. As métricas por nó (item 11 da
 arquitetura) mostraram que a maior parte da hora estava num único agente
 esperando o provedor — e que trocar o provedor valia mais que qualquer ajuste
 de governança.
+
+---
+
+## 39. A rodada que era do teste, contada cinco vezes
+
+**Sintoma:** com o Codex, a calculadora de juros chegava verde ao gate, mas
+quase nunca de primeira. Das cinco execuções de 21/09, só a última saiu numa
+rodada. As outras pagaram 2 ou 3 rodadas de desenvolvimento, e duas pararam
+no teto:
+
+| Thread | Rodadas | Passadas do QA | Causa da rodada extra |
+|---|---|---|---|
+| `d1b5175b` | 2 | 2 | 4 testes esperavam `R$ 1.120,00` com espaço comum; o `Intl` produz U+00A0 |
+| `6d6839ac` | 2 | 1 | a mesma, nas linhas da tabela (o QA normalizou só a página inteira) |
+| `f96bb730` | 3 | 3 | `:global(*)` num CSS Module quebrou o `next build`; depois, uma reconexão do Codex lida como morte |
+| `9a86ddb0` | 3 | 2 | seletor `.amount` numa página com CSS Module; valor esperado calculado de cabeça (1329,67 em vez de 1329,49) |
+| `35d3bceb` | **1** | **1** | — 11,7 min, 15 testes, cobertura 100%, +2 pts de cota |
+
+**Causa raiz:** em quatro de cinco casos o código estava certo e o **teste**
+estava errado. Mas o laço de correção só sabe mandar o vermelho ao
+executor, que é proibido de tocar na suíte. Ele então mudava o código para
+agradar o teste: trocou o formatador, criou classes globais e reescreveu uma
+fórmula correta duas vezes atrás de um número impossível. A suíte só
+voltava ao QA quando o executor não mudava nada (item 36), e isso quase
+nunca acontece, porque ele sempre muda alguma coisa.
+
+O único defeito de código real, o build quebrado, veio do mesmo lugar: o
+executor escreve sem ver o compilador, e o erro só aparecia depois de QA,
+guard de critérios e suíte.
+
+**Solução**, em camadas, cada uma medida por uma das threads acima:
+
+- **Espaço do `Intl` nos dois lados:** o QA lê todo texto da página por um
+  helper que normaliza U+00A0 e U+202F; o executor exibe o valor formatado
+  com espaço comum, como o pedido escreve. Dois lados porque o primeiro
+  sozinho falhou na execução seguinte.
+- **Seletor estável:** o executor declara `data-testid` nos valores e nas
+  mensagens de erro; o QA nunca seleciona por classe de CSS Module, que no
+  vitest não vira `.x`.
+- **Valor esperado por comando:** o que a spec não traz literalmente, o QA
+  calcula no terminal, nunca de cabeça.
+- **Compilar antes do QA:** o nó de desenvolvimento roda o build na jaula e
+  devolve o erro ao executor, com até 2 ajustes. Isso custa um build (~40 s)
+  em vez de uma rodada; na `9a86ddb0` o ajuste pegou um build quebrado sem
+  virar rodada.
+- **Falha repetida volta ao QA:** os mesmos testes vermelhos antes e depois
+  de uma correção são sinal de teste suspeito. A suíte volta ao QA com
+  ordem de recalcular e reconferir o seletor, mesmo com o orçamento de
+  correção no fim.
+- **QA com a régua do guard:** o QA percorre cada critério no nível em que
+  ele é observável e fecha o manifesto com a matriz critério → teste. O
+  guard aceita uma asserção representativa por comportamento e deixa
+  aparência (layout, contraste, legibilidade) para a verificação visual.
+- **Reconexão não é morte:** um `error` do Codex seguido de
+  `turn.completed` foi recuperado por ele mesmo.
+
+**Ainda não validado:** a `35d3bceb` é uma execução só. As duas redes, falha
+repetida e reconexão, nem foram acionadas nela. A regra de uma rodada vale
+enquanto as próximas execuções confirmarem.
+
+**Princípio:** **quando o juiz pode errar, o laço precisa de uma rota de
+volta ao juiz.** Um teste é código escrito por um agente, tão falível
+quanto o código que ele julga. Um laço que só sabe corrigir o réu
+transforma cada erro do juiz em retrabalho do réu, e o réu, proibido de
+contestar, obedece. Os dois sinais de que o juiz errou são baratos de ler:
+a mesma asserção sobrevivendo a uma correção, e o texto certo na tela
+sendo lido errado pelo teste.
 
 ---
 
