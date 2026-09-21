@@ -166,11 +166,17 @@ sequenceDiagram
    desenvolvimento (inicial, testes ou revisão) —, com resumo impresso ao
    final. Sem isso não há como saber se uma mudança melhorou o resultado.
 12. **Provedor de LLM intercambiável**: `LLM_PROVEDOR` escolhe entre o
-   gateway gateway corporativo on-premise (padrão, cedido por um cliente) e o OpenCode
-   Zen, como `DEV_EXECUTOR` escolhe o executor — a governança do grafo não
-   depende de quem responde. Com o gateway corporativo a autenticação é Keycloak: login
-   interativo uma única vez no OpenCode, depois refresh automático sob o
-   mesmo lock do plugin, e o `Authorization` é trocado **por request** (um nó
-   longo não fica com token vencido). O token nunca entra no repo nem no
-   `.env`. As três superfícies de modelo (`MODEL`, `MODEL_FERRAMENTAS`,
-   `OPENCODE_RUN_MODEL`) seguem o provedor; o rollback para o Zen é uma linha.
+   Codex CLI (`codex`), o gateway gateway corporativo on-premise (`gateway`) e o
+   OpenCode Zen (`zen`), como `DEV_EXECUTOR` escolhe o executor — a
+   governança do grafo não depende de quem responde. A configuração em uso é
+   **Codex com `gpt-5.6-luna`** nos agentes e no executor: no mesmo pedido
+   (calculadora de juros em Next.js), a média caiu de 70,8 min com o OpenCode
+   e o gateway corporativo, nunca verde no gate, para 21,4 min, com as execuções mais
+   recentes verdes sem intervenção — a medição e as ressalvas estão no item 38
+   do [RESILIENCIA.md](RESILIENCIA.md). Com o gateway corporativo a autenticação é
+   Keycloak: login interativo uma única vez no OpenCode, depois refresh
+   automático sob o mesmo lock do plugin, e o `Authorization` é trocado **por
+   request** (um nó longo não fica com token vencido). O token nunca entra no
+   repo nem no `.env`. As três superfícies de modelo (`MODEL`,
+   `MODEL_FERRAMENTAS`, `OPENCODE_RUN_MODEL`) seguem o provedor; o rollback
+   entre provedores é uma linha.

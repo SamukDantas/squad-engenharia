@@ -466,9 +466,18 @@ CODEX_RUN_MODEL=gpt-5.6-luna
 - Agente com ferramenta pelo CrewAI não roda neste provedor: com
   `DEV_EXECUTOR=crews`, a squad falha na montagem, antes de pagar nó nenhum.
 
-Medido no mesmo pedido (conversor de temperaturas): **8,0 min** de nós com
-tudo pelo Codex, contra 12,7 min com o Codex só no executor e os agentes no
-gateway corporativo.
+Medido nos mesmos pedidos, somando o tempo dos nós até o gate:
+
+| Pedido | OpenCode + gateway corporativo | Codex + `gpt-5.6-luna` |
+|---|---|---|
+| Calculadora de juros (Next.js) | 73,3 e 68,3 min, nenhuma verde no gate | média 21,4 min (melhor: 14,7), as duas últimas verdes sem intervenção |
+| Passada do QA | média 12,5 min (pior: 23,0) | média 2,3 min (pior: 3,7) |
+| Conversor de temperaturas (Python) | 12,5 min | 8,0 e 4,3 min |
+
+Com o Codex só no executor e os agentes ainda no gateway corporativo, o conversor levou
+12,6 min: o ganho vem de tirar os agentes do gateway. Parte da melhora também
+veio de correções no grafo feitas no meio do caminho; a análise completa está
+no item 38 do [RESILIENCIA.md](docs/RESILIENCIA.md).
 
 ### Gateway corporativo de IA
 

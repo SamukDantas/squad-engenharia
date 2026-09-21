@@ -14,7 +14,9 @@ defeitos dela (20–21); a correção seguinte encontrou os defeitos de si mesma
 (22–23); e a primeira execução que produziu uma entrega boa revelou que o
 parser do veredito contrariava a lição que ele implementava (24). O padrão é o
 próprio método — cada volta só apareceu porque a anterior foi executada e
-observada, não argumentada.
+observada, não argumentada. Os itens 35–37 vieram das execuções em
+setembro/2026 com o gateway corporativo, e o 38 compara esse provedor com o
+Codex CLI no mesmo pedido.
 
 ---
 
@@ -1286,6 +1288,57 @@ spec.** Cada camada que acrescenta interpretação — o arquiteto — pode
 enriquecer o *como*, mas não pode aumentar o *o quê*. E um juiz que só vê a
 interpretação não consegue separar o que foi pedido do que foi inventado: ele
 precisa ver a fonte.
+
+---
+
+## 38. O provedor que custava a hora
+
+**Sintoma:** a calculadora de juros em Next.js, com os agentes no gateway
+corporativo e o executor no OpenCode, nunca chegou verde ao gate. A thread
+`00b92498` terminou em erro aos 85 min; a `33c19d49` terminou em erro, foi
+retomada, bateu o teto de correção e só foi publicada depois de rodadas extras
+à mão. O nó que mais pesava era o QA: de 6 a 23 min **por passada** de
+`escrever_testes`, enquanto o executor levava 3 a 4 min por rodada.
+
+**Causa raiz:** o gargalo era o provedor, não o grafo. O QA é o agente que mais
+conversa com o modelo (lê a entrega, escreve, roda, corrige), e cada volta
+pagava a latência do gateway *lab*. Com a sessão Keycloak expirando em horas,
+uma execução longa ainda arriscava morrer no meio de um nó.
+
+**Solução:** a squad inteira passou a rodar pelo Codex CLI com o
+`gpt-5.6-luna` (`LLM_PROVEDOR=codex`, `DEV_EXECUTOR=codex`): os agentes de
+texto pelo `CodexLLM`, em sandbox read-only, e o QA e o executor por
+`codex exec` no workspace. O OpenCode com o gateway corporativo foi abandonado em 21/09.
+
+**Medido** (tempo somado dos nós até o gate, sem as pausas no gate humano;
+fonte: `metrics/<thread>.json`):
+
+| Pedido | OpenCode + gateway corporativo | Codex + Luna | Ganho |
+|---|---|---|---|
+| Calculadora de juros (Next.js) | 73,3 min (`00b92498`, erro) e 68,3 min (`33c19d49`, teto) | 29,2 / 21,8 / 20,0 / 14,7 min (`d4a926e5`, `594ca62f`, `47339386`, `d1b5175b`) | média 70,8 → 21,4 min (**3,3×**); melhor contra melhor 68,3 → 14,7 (**4,6×**) |
+| Passada do QA (calculadora) | média 12,5 min, pior 23,0 | média 2,3 min, pior 3,7 | **~5×** |
+| Desfecho (calculadora) | nenhuma verde no gate | as quatro no gate; as duas últimas verdes, sem intervenção | — |
+| Conversor de temperaturas (Python) | 12,5 min (`839f368d`) | 8,0 e 4,3 min (`fecf5303`, `65962079`) | **1,6× a 2,9×** |
+
+Uma execução intermediária, com o Codex só no executor e os agentes ainda no
+gateway corporativo (`055e0f17`, conversor), levou 12,6 min — praticamente o mesmo que a
+gateway corporativo puro. O ganho só apareceu quando os agentes também saíram do gateway.
+
+**O que a tabela não isola:** entre as execuções com o gateway corporativo e as com o
+Codex entraram correções no grafo — remoção dos testes do executor, correção
+cirúrgica do QA, poda da spec (item 37), regra de contraste no executor e a
+receita jsdom do QA. Elas explicam parte da queda de 29,2 para 14,7 min
+*dentro* das execuções com o Codex. O tempo por passada do QA, com tarefas
+equivalentes, é quase todo do provedor. A estimativa honesta fica entre 3× e
+4× mais rápido, e de "nunca verde" para "verde na primeira ida ao gate". A
+amostra é pequena: 2 execuções contra 4 na calculadora.
+
+**Princípio:** **meça por nó antes de culpar o grafo.** Com só o tempo total,
+as execuções de uma hora pareciam um problema de retrabalho, e a primeira
+reação seria mexer em tetos e guards. As métricas por nó (item 11 da
+arquitetura) mostraram que a maior parte da hora estava num único agente
+esperando o provedor — e que trocar o provedor valia mais que qualquer ajuste
+de governança.
 
 ---
 
