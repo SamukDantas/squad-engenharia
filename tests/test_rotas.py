@@ -250,3 +250,20 @@ def test_todo_teto_nomeia_um_laco_conhecido():
     for d in disparos:
         assert d.teto is not None
         assert d.teto.laco in conhecidos, d.teto
+
+
+# ---------- retomada: precisa de credencial do provedor? ----------
+
+def test_retomada_no_gate_nao_precisa_de_llm():
+    """Publicar uma entrega pronta não pode depender de login no provedor."""
+    assert rotas.retomada_chama_llm(("aprovacao_humana",)) is False
+    assert rotas.retomada_chama_llm(("deploy",)) is False
+
+
+def test_retomada_no_meio_do_ramo_precisa():
+    assert rotas.retomada_chama_llm(("servico",)) is True
+    assert rotas.retomada_chama_llm(("desenvolvimento",)) is True
+
+
+def test_thread_terminada_nao_precisa():
+    assert rotas.retomada_chama_llm(()) is False

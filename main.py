@@ -24,6 +24,7 @@ load_dotenv(override=True)
 
 from src.squad.adaptadores import perfis  # noqa: E402
 from src.squad.adaptadores.metricas_json import eventos, registrar, resumo  # noqa: E402
+from src.squad.dominio.rotas import retomada_chama_llm  # noqa: E402
 from src.squad.graph.maestro import construir_maestro  # noqa: E402
 from src.squad.graph.workflow import DeployNegado, construir_grafo  # noqa: E402
 from src.squad.llm import conferir_credencial  # noqa: E402
@@ -56,6 +57,19 @@ def _destino_deploy(estado) -> str:
     return f"{dono}/{nome} ({visibilidade})"
 
 
+def _exigir_credencial() -> None:
+    """Credencial ausente ou sessão expirada vira a instrução de login aqui,
+    e não `Connection error` no meio de um nó já pago
+    (llm.conferir_credencial)."""
+    try:
+        conferir_credencial()
+    except RuntimeError as e:
+        # Traceback aqui não ajuda ninguém: a mensagem já diz o que fazer, e
+        # a pilha só empurra a instrução para fora da tela.
+        print(f"\n{e}")
+        raise SystemExit(1)
+
+
 def _rodar(grafo, entrada, config) -> None:
     for evento in grafo.stream(entrada, config=config):
         print(f"--- nó concluído: {list(evento.keys())[0]} ---")
@@ -78,17 +92,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # Antes de qualquer nó: credencial ausente ou sessão expirada vira erro com
-    # a instrução de login aqui, e não `Connection error` no meio do
-    # planejamento já pago (ver llm.conferir_credencial).
-    try:
-        conferir_credencial()
-    except RuntimeError as e:
-        # Traceback aqui não ajuda ninguém: a mensagem já diz o que fazer, e a
-        # pilha só empurra a instrução para fora da tela.
-        print(f"\n{e}")
-        raise SystemExit(1)
-
     if args.thread:
         thread_id = args.thread
         paralelo = _foi_paralela(thread_id)
@@ -101,6 +104,9 @@ def main() -> None:
         registrar(thread_id, "retomada")
         entrada = None  # None = continuar de onde parou
     else:
+        # Execução nova sempre começa por LLM (planejamento). Conferido antes de
+        # criar a thread, pelo mesmo motivo da stack logo abaixo.
+        _exigir_credencial()
         paralelo = args.paralelo
         pedido = " ".join(args.pedido) or "Criar endpoint de healthcheck"
         # Resolve antes de criar a thread: uma stack digitada errada não deve
@@ -119,6 +125,8 @@ def main() -> None:
             print("Modo paralelo: o pedido será decomposto em microsserviços.")
 
     grafo = construir_maestro() if paralelo else construir_grafo()
+    if args.thread and retomada_chama_llm(grafo.get_state(config).next):
+        _exigir_credencial()
 
     # O gate humano entra no try: negar o deploy levanta, e esse desfecho é tão
     # informativo quanto uma queda do provedor. Com os dois lados cobertos, um
