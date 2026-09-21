@@ -132,9 +132,9 @@ def test_refresh_recusado_com_token_ainda_vivo_usa_o_que_resta(arquivo, monkeypa
 
 # ---------- escolha do provedor ----------
 
-def test_provedor_padrao_e_gateway(monkeypatch):
+def test_provedor_padrao_e_codex(monkeypatch):
     monkeypatch.delenv("LLM_PROVEDOR", raising=False)
-    assert llm.provedor() == "gateway"
+    assert llm.provedor() == "codex"
 
 
 def test_provedor_invalido_falha_alto(monkeypatch):

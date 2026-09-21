@@ -70,9 +70,18 @@ def _binario() -> str:
     return binario
 
 
+# O modelo da squad: medido contra o OpenCode com o gateway corporativo no mesmo pedido,
+# 3 a 4x mais rápido e verde no gate (RESILIENCIA.md, item 38).
+MODELO_PADRAO = "gpt-5.6-luna"
+
+
 def modelo() -> str:
-    """O modelo de todo uso do Codex na squad — executor e agentes."""
-    return (os.getenv("CODEX_RUN_MODEL") or "").strip()
+    """O modelo de todo uso do Codex na squad — executor e agentes.
+
+    Sempre explícito: a squad roda com --ignore-user-config, e sem `--model`
+    quem escolheria seria o padrão do servidor, que muda sem aviso.
+    """
+    return (os.getenv("CODEX_RUN_MODEL") or "").strip() or MODELO_PADRAO
 
 
 def _base(diretorio: str, sandbox: str) -> list[str]:
@@ -93,8 +102,7 @@ def _base(diretorio: str, sandbox: str) -> list[str]:
     ]
     if os.name == "nt":
         comando += ["-c", f'windows.sandbox="{_sandbox_windows()}"']
-    if modelo():
-        comando += ["--model", modelo()]
+    comando += ["--model", modelo()]
     return comando
 
 
@@ -196,7 +204,7 @@ def _rodar(comando: list[str], timeout: int, rotulo: str, entrada: str | None = 
 
 def executar_codex(workspace: str, spec: str, feedback_qa: str, perfil) -> str:
     gravar_tarefa(workspace, spec, feedback_qa, perfil)
-    print(f">>> Desenvolvimento via Codex CLI ({modelo() or 'modelo padrão'})...")
+    print(f">>> Desenvolvimento via Codex CLI ({modelo()})...")
     if os.name == "nt":
         print(f"    sandbox: workspace-write ({_sandbox_windows()}) | config e rules da máquina: ignorados")
     saida = _rodar(_comando(workspace), _timeout(), "desenvolvimento")
@@ -264,7 +272,7 @@ def executar_qa(workspace: str, descricao: str) -> str:
     dir_squad = Path(workspace) / DIR_SQUAD
     dir_squad.mkdir(parents=True, exist_ok=True)
     (dir_squad / ARQUIVO_TAREFA_QA).write_text(REGRAS_QA + descricao, encoding="utf-8")
-    print(f">>> QA via Codex CLI ({modelo() or 'modelo padrão'})...")
+    print(f">>> QA via Codex CLI ({modelo()})...")
     saida = _rodar(_comando(workspace, PROMPT_QA), _timeout(), "escrita de testes")
     print(relatavel((_resumo(saida) or saida)[-LIMITE_SAIDA:]))
     return saida

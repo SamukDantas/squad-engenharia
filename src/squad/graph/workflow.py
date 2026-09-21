@@ -636,10 +636,10 @@ def _nome_repo(state: EstadoProjeto) -> str:
 
 def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """Escreve a implementação no workspace. O executor é intercambiável
-    (DEV_EXECUTOR): o OpenCode CLI como mão de obra especialista, ou as crews
-    CrewAI como caminho sem dependência externa. A governança do grafo é a
-    mesma nos dois casos."""
-    executor = os.getenv("DEV_EXECUTOR", "opencode").strip().lower()
+    (DEV_EXECUTOR): o Codex CLI (padrão) ou o OpenCode CLI como mão de obra
+    especialista, ou as crews CrewAI como caminho sem dependência externa. A
+    governança do grafo é a mesma nos três casos."""
+    executor = os.getenv("DEV_EXECUTOR", "codex").strip().lower()
     feedback = state.get("feedback_qa", "")
     origem = state.get("origem_feedback") or "inicial"
     # Só numa rodada de correção há "antes" com que comparar; na inicial o
@@ -673,7 +673,7 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
             )
         else:
             raise ValueError(
-                f"DEV_EXECUTOR inválido: '{executor}'. Use 'opencode', 'codex' "
+                f"DEV_EXECUTOR inválido: '{executor}'. Use 'codex', 'opencode' "
                 "ou 'crews'."
             )
     _remover_testes_do_executor(state, testes_antes, perfil)

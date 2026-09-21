@@ -37,14 +37,14 @@ squad passou por 42 testes verdes e por um revisor que aprovou, estando
 ilegível no tema escuro (1,28:1 medido, exigido 4,5:1).
 
 O nó de desenvolvimento é **intercambiável** (`DEV_EXECUTOR`): por padrão usa
-o **OpenCode CLI** em modo headless como mão de obra, com a squad no papel de
-gerência (guard, QA real e gate governando o executor); `codex` usa o **Codex
-CLI** (`codex exec`) do mesmo jeito; `crews` mantém o caminho com as crews
+o **Codex CLI** (`codex exec`) em modo headless como mão de obra, com a squad
+no papel de gerência (guard, QA real e gate governando o executor); `opencode`
+usa o **OpenCode CLI** do mesmo jeito; `crews` mantém o caminho com as crews
 CrewAI, sem dependência externa. A tarefa que os dois CLIs recebem é a mesma
 (`adaptadores/tarefa_executor.py`) — o que muda é a jaula de cada um, e a
 governança do grafo não muda em nenhum caso. Do mesmo jeito, o
-**provedor de LLM** é escolhido por `LLM_PROVEDOR` (gateway gateway corporativo on-premise
-ou OpenCode Zen), sem mudar nada na governança do grafo.
+**provedor de LLM** é escolhido por `LLM_PROVEDOR` (Codex, o padrão; gateway
+gateway corporativo on-premise ou OpenCode Zen), sem mudar nada na governança do grafo.
 
 O **guard de aderência** é uma chamada única de LLM (barata) que confere se a
 spec produzida trata mesmo do pedido antes de gastar tokens com o
@@ -80,7 +80,7 @@ squad-engenharia/
     │   ├── guards.py           # entrega vazia e rodada que não corrigiu nada
     │   ├── vereditos.py        # leitura de SIM/NAO e APROVADO/REPROVADO
     │   └── orcamento.py        # repartição do contexto enviado ao LLM
-    ├── llm.py                  # LLM da squad: provedor gateway corporativo ou Zen (LLM_PROVEDOR)
+    ├── llm.py                  # LLM da squad: provedor Codex, gateway corporativo ou Zen (LLM_PROVEDOR)
     ├── tools.py                # ferramentas de arquivo confinadas ao workspace
     ├── alvo.py                 # sobe a entrega como servidor em rede isolada
     ├── visual.py               # renderiza a entrega e mede contraste (Docker)
@@ -115,11 +115,7 @@ O código gerado usa apenas a stdlib e as libs **pré-provisionadas** no
 em runtime — import fora da lista quebra o pytest e vira reprova com stack
 trace real.
 
-No modo padrão (`DEV_EXECUTOR=opencode`) é preciso ter o **OpenCode CLI**
-instalado e autenticado (`npm i -g opencode-ai`). Para rodar sem o CLI, use
-`DEV_EXECUTOR=crews` no `.env`.
-
-Com `DEV_EXECUTOR=codex`, o executor é o **Codex CLI** (`npm i -g
+No modo padrão (`DEV_EXECUTOR=codex`), o executor é o **Codex CLI** (`npm i -g
 @openai/codex`, e `codex` uma vez para o login — a conta ChatGPT serve, sem
 chave de API). O pacote da Microsoft Store **não** serve: o binário dele fica
 numa pasta protegida e responde "Acesso negado". O escopo por execução sai de
@@ -134,18 +130,19 @@ instalação como administrador). Sem isso, a política recusa **todo** comando,
 inclusive leitura, e a run termina com exit 0 sem ter feito nada.
 
 O mesmo `--ignore-user-config` vale para o **modelo**: o `model` do seu
-`config.toml` não chega ao executor, e sem `CODEX_RUN_MODEL` quem escolhe é o
-padrão do servidor. Fixe a variável quando quiser garantia de qual modelo
-roda. Com login por conta ChatGPT só valem os modelos liberados para o plano —
+`config.toml` não chega ao executor. Por isso a squad manda sempre `--model`:
+`CODEX_RUN_MODEL`, ou `gpt-5.6-luna` quando a variável está vazia. Com login por conta ChatGPT só valem os modelos liberados para o plano —
 medido nesta máquina: `gpt-5.6-terra`, `gpt-5.6-luna` e `gpt-5.5` respondem, e
 qualquer outro nome (inclusive o `gpt-5.6-sol` que a documentação cita) volta
 `400 not supported when using Codex with a ChatGPT account`. O catálogo da sua
 conta está em `~/.codex/models_cache.json`.
 
-O executor é a **única** superfície que o Codex cobre. Os agentes (planejamento,
-QA, revisão, guards) são CrewAI e falam com um endpoint compatível com OpenAI;
-o Codex CLI é um agente de terminal, não um endpoint, e por isso continua sendo
-`LLM_PROVEDOR` quem decide o modelo deles.
+Os agentes (planejamento, QA, revisão, guards) seguem `LLM_PROVEDOR`, que por
+padrão também é o Codex — ver [Provedor de LLM](#provedor-de-llm-codex-gateway-corporativo-ou-opencode-zen).
+
+Com `DEV_EXECUTOR=opencode`, é preciso ter o **OpenCode CLI** instalado e
+autenticado (`npm i -g opencode-ai`). Para rodar sem CLI nenhum, use
+`DEV_EXECUTOR=crews` no `.env`.
 
 O `--dir` do CLI troca o diretório de trabalho, mas **não isola a
 configuração**: sem intervenção, o executor herda o `opencode.json` global da
@@ -442,7 +439,7 @@ aparece é `Repository not found` — `gh auth switch --user <conta>` resolve.
 `LLM_PROVEDOR` escolhe quem responde aos agentes. O fluxo, com a checagem do
 token, está no diagrama de sequência do [ARQUITETURA.md](docs/ARQUITETURA.md).
 
-### Codex (`LLM_PROVEDOR=codex`)
+### Codex (`LLM_PROVEDOR=codex`, padrão)
 
 Todos os agentes rodam pelo **Codex CLI**, com o login da conta ChatGPT — sem
 endpoint HTTP, sem chave de API e sem Keycloak. Combine com
