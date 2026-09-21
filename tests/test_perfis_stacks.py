@@ -340,3 +340,13 @@ def test_executor_nextjs_recebe_a_regra_de_contraste_nos_dois_temas():
     executor pensava a cor de destaque só para o tema claro."""
     instrucoes = perfis.obter("nextjs").instrucoes_executor
     assert "4,5:1" in instrucoes and "DOIS temas" in instrucoes
+
+
+def test_receita_proibe_import_meta_url_para_ler_arquivo_no_jsdom():
+    """Thread `594ca62f`: o QA seguiu a receita de interação e, no mesmo
+    arquivo jsdom, leu um CSS por `new URL(..., import.meta.url)` — que o
+    jsdom quebra com "The URL must be of scheme file". 1 de 28 testes
+    vermelho por ambiente, e duas rodadas de correção gastas no executor."""
+    instrucoes = perfis.obter("nextjs").instrucoes_qa
+    assert "process.cwd()" in instrucoes
+    assert "NÃO use `new URL(..., import.meta.url)`" in instrucoes

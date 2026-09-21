@@ -245,12 +245,20 @@ PERFIL = PerfilStack(
         "dentro de `act`;\n"
         "  - para enviar, dispare `new Event(\"submit\", {bubbles: true, "
         "cancelable: true})` no `<form>`, dentro de `act`;\n"
-        "  - desmonte no `afterEach` com `act(() => raiz.unmount())`."
+        "  - desmonte no `afterEach` com `act(() => raiz.unmount())`;\n"
+        "  - para ler um arquivo do projeto (CSS, JSON) num arquivo jsdom, use "
+        "`readFileSync(join(process.cwd(), \"<caminho a partir da raiz>\"), "
+        "\"utf8\")`. NÃO use `new URL(..., import.meta.url)`: no jsdom o `URL` "
+        "global é outro, e o `readFileSync` o recusa com \"The URL must be of "
+        "scheme file\"."
     ),
     # Medido: sem a receita acima, o QA da calculadora de juros (thread
     # `d4a926e5`) só testou a página de forma estática, e o guard de critérios
     # reprovou a suíte quatro vezes pedindo teste de interação — que o jsdom da
-    # imagem sempre permitiu.
+    # imagem sempre permitiu. Com a receita (thread `594ca62f`), o guard
+    # aprovou na segunda passada, mas o QA leu um CSS por `import.meta.url`
+    # num arquivo jsdom e 1 de 28 testes quebrou por ambiente — daí a última
+    # linha da receita, validada na jaula reproduzindo o mesmo erro.
     ambiente_testes=(
         "vitest 2.1.8 com jsdom 25 e react-dom 18 (sem @testing-library): "
         "lógica pura, renderização estática e interação com DOM (digitar, "
