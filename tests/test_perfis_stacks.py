@@ -334,6 +334,14 @@ def test_nextjs_ensina_a_receita_de_interacao_que_roda_na_jaula():
     assert "jsdom" in perfis.obter("nextjs").ambiente_testes
 
 
+def test_executor_nextjs_recebe_a_regra_de_contraste_nos_dois_temas():
+    """Threads `d4a926e5` e `594ca62f`: o mesmo achado visual duas vezes — o
+    subtítulo colorido escuro sobre o fundo escuro (2,55:1 e 2,26:1). O
+    executor pensava a cor de destaque só para o tema claro."""
+    instrucoes = perfis.obter("nextjs").instrucoes_executor
+    assert "4,5:1" in instrucoes and "DOIS temas" in instrucoes
+
+
 def test_receita_proibe_import_meta_url_para_ler_arquivo_no_jsdom():
     """Thread `594ca62f`: o QA seguiu a receita de interação e, no mesmo
     arquivo jsdom, leu um CSS por `new URL(..., import.meta.url)` — que o
