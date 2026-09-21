@@ -31,6 +31,7 @@ class EstadoProjeto(TypedDict, total=False):
     tentativas: int      # contador do laço de correções
     correcao_inerte: str # rodada de correção sem mudança: "" | revisar_suite | aprovacao_humana
     revisoes_suite: int  # vezes que o QA revisou a suíte contestada pelo dev
+    suite_contestada: bool  # a mesma asserção falhou de novo depois da correção
     falha_de_build: bool # o vermelho foi de compilação, não de teste
     motivo_gate: str     # diagnóstico que o gate humano mostra além do placar
     revisao_tentativas: int  # contador só das reprovações de revisão

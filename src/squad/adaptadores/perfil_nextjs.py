@@ -259,7 +259,13 @@ PERFIL = PerfilStack(
         "ele — página inteira, linha de tabela, célula, alerta. Nenhuma "
         "asserção sobre `.textContent` cru. Sem isso o teste falha com o "
         "código certo, e a rodada de correção vai mexer no código para "
-        "agradar o teste."
+        "agradar o teste.\n"
+        "Para achar elementos, use `[data-testid=\"...\"]` (o executor os "
+        "declara nos valores exibidos e nas mensagens de erro), tags e "
+        "atributos semânticos (`h1`, `table`, `label[for]`, `role`, "
+        "`aria-*`). NUNCA selecione pela classe de um CSS Module "
+        "(`className={styles.x}`): no vitest ela não vira `.x`, o seletor "
+        "volta vazio e o teste falha com o código certo."
     ),
     # A regra do espaço não separável entrou depois da thread `d1b5175b`: 4
     # testes da página esperavam "R$ 1.120,00" com espaço comum, o
@@ -269,6 +275,9 @@ PERFIL = PerfilStack(
     # criou o `normalizar`, usou no texto da página inteira e leu as linhas da
     # tabela por `.textContent` cru — mesma rodada extra. Daí o helper único
     # para toda leitura e, do lado do executor, o espaço comum na exibição.
+    # O `data-testid` veio da thread `9a86ddb0`: o QA selecionou `.amount`,
+    # a página usava `className={styles.amount}` (CSS Module), o seletor voltou
+    # vazio em 4 testes e o executor gastou a rodada criando classes globais.
     # Medido: sem a receita acima, o QA da calculadora de juros (thread
     # `d4a926e5`) só testou a página de forma estática, e o guard de critérios
     # reprovou a suíte quatro vezes pedindo teste de interação — que o jsdom da
@@ -305,7 +314,12 @@ PERFIL = PerfilStack(
         "espaço comum, como o pedido escreve (`R$ 1.126,83`): o `Intl` insere "
         "espaço não separável (U+00A0 ou U+202F), então aplique "
         "`.replace(/[\\u00a0\\u202f]/g, \" \")` no texto formatado antes de "
-        "exibi-lo."
+        "exibi-lo.\n"
+        "- Todo elemento que exibe um valor calculado ou uma mensagem de erro "
+        "leva um `data-testid` descritivo e estável (ex.: "
+        "`data-testid=\"montante-simples\"`, `data-testid=\"erro-taxa\"`), e "
+        "cada linha de tabela de resultados também. É por eles que os testes "
+        "acham o elemento: classe de CSS Module não serve de seletor."
     ),
     # A regra de contraste acima entrou depois de duas execuções seguidas da
     # calculadora de juros (threads `d4a926e5` e `594ca62f`) caírem no mesmo

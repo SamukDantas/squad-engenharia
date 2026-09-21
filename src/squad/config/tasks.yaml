@@ -118,6 +118,10 @@ escrever_testes:
     módulo, quando a spec o exige também na interface, conta como faltando.
     Termine o manifesto com uma linha por critério: critério → teste que o
     cobre.
+    Valor esperado que a spec não traz literalmente (um cenário que você
+    inventou) é calculado com um comando do terminal, nunca de cabeça: um
+    número errado no teste custa rodadas do desenvolvedor tentando
+    satisfazê-lo.
     Se houver retorno de uma rodada anterior (abaixo), trate-o como
     prioridade: complemente ou corrija os testes conforme apontado, sem
     regravar os arquivos que não precisam mudar.

@@ -230,3 +230,54 @@ def fora_da_suite(
     )
     criados = sorted(a for a in depois if a not in antes and not e_teste(a))
     return alterados, criados
+
+
+# ---------- a mesma falha depois da correção ----------
+
+# Linha que nomeia um teste vermelho: `FAIL  arq > descr > caso` (vitest) e
+# `FAILED arq::caso - msg` (pytest). O que vem depois de " - " é a mensagem,
+# que pode trazer valores que mudam de rodada para rodada.
+_LINHA_FALHA = re.compile(r"^\s*FAIL(?:ED)?\s+(.+?)(?:\s+-\s+.*)?\s*$", re.M)
+
+
+def testes_que_falharam(saida_testes: str) -> frozenset[str]:
+    """Os nomes dos testes vermelhos de uma saída do runner."""
+    return frozenset(m.group(1).strip() for m in _LINHA_FALHA.finditer(saida_testes or ""))
+
+
+def falha_repetida(anterior: str, atual: str) -> bool:
+    """Os mesmos testes falharam por asserção antes e depois da correção.
+
+    Complementa `destino_da_correcao_inerte`, que só pega a rodada que não
+    mudou nada. Medido na thread `9a86ddb0` (calculadora de juros): o QA
+    calculou de cabeça 1234,56 x 1,025^3 = 1329,67 (o certo é 1329,49); o
+    executor mexeu no código duas vezes tentando satisfazer um número
+    impossível, a mesma asserção falhou nas duas e a execução bateu o teto de
+    correção sem nunca devolver a suíte ao QA.
+    """
+    atuais = testes_que_falharam(atual)
+    return (
+        bool(atuais)
+        and atuais == testes_que_falharam(anterior)
+        and falha_de_assercao(atual)
+    )
+
+
+def brief_falha_repetida(saida_testes: str) -> str:
+    """O que o QA recebe quando a mesma falha sobrevive a uma correção."""
+    return (
+        "A suíte ficou VERMELHA nos MESMOS testes antes e depois de uma rodada "
+        "de correção do desenvolvedor: ele mudou o código e a asserção "
+        "continuou falhando igual. O erro provavelmente está no TESTE. Para "
+        "cada teste abaixo, confira a expectativa contra a especificação:\n"
+        "- valor esperado que a spec não fixa literalmente precisa ser "
+        "recalculado com um comando (por exemplo `node -e` ou `python -c`), "
+        "nunca de cabeça;\n"
+        "- seletor que não encontra o elemento (resultado vazio) precisa "
+        "mirar o que a página realmente renderiza;\n"
+        "- se o teste estiver certo e o código errado, mantenha o teste "
+        "exatamente como está.\n"
+        "Não remova nem enfraqueça teste que cobre um critério de aceite da "
+        "spec só para ficar verde.\n\n"
+        f"Saída real dos testes:\n{saida_testes}"
+    )

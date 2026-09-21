@@ -368,10 +368,23 @@ def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         )
     else:
         feedback = ""
+    revisoes = state.get("revisoes_suite", 0)
+    contestada = (
+        not resultado.testes_ok
+        and not resultado.falha_de_build
+        and state.get("origem_feedback") == "testes"
+        and revisoes < rotas.MAX_REVISOES_SUITE
+        and guards.falha_repetida(state.get("saida_testes", ""), saida)
+    )
+    if contestada:
+        feedback = guards.brief_falha_repetida(saida)
+        registrar(thread_id, "suite_contestada", testes=sorted(guards.testes_que_falharam(saida)))
     return {
         **campos,
         "cobertura_ok": cobertura_ok,
         "falha_de_build": resultado.falha_de_build,
+        "suite_contestada": contestada,
+        "revisoes_suite": revisoes + 1 if contestada else revisoes,
         "feedback_qa": feedback,
         # Rodada movida por execução: se voltar ao desenvolvimento, a suíte é
         # reescrita (o veredito veio dela).
