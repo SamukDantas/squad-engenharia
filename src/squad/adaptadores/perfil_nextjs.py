@@ -268,8 +268,20 @@ PERFIL = PerfilStack(
         "dentro de `tests/`. A suíte é escrita por outro agente da equipe de "
         "qualidade.\n"
         "- NÃO crie configuração de vitest nem scripts de teste no "
-        "`package.json`: a suíte é executada pelo pipeline por linha de comando."
+        "`package.json`: a suíte é executada pelo pipeline por linha de comando.\n"
+        "- Contraste: TODO texto precisa de pelo menos 4,5:1 contra o fundo que "
+        "aparece atrás dele, nos DOIS temas do sistema, claro e escuro — "
+        "inclusive subtítulos, rótulos e textos de destaque coloridos. Se a "
+        "página tiver tema escuro, escolha as cores dele de propósito (tons "
+        "claros sobre fundo escuro); não reaproveite a cor de destaque do tema "
+        "claro. O pipeline renderiza a página nos dois temas e mede o contraste "
+        "de cada texto: abaixo de 4,5:1, a entrega volta para correção."
     ),
+    # A regra de contraste acima entrou depois de duas execuções seguidas da
+    # calculadora de juros (threads `d4a926e5` e `594ca62f`) caírem no mesmo
+    # achado da verificação visual: o subtítulo colorido do topo ficou escuro
+    # sobre o fundo escuro (2,55:1 e 2,26:1). O executor escolhia a cor de
+    # destaque pensando no tema claro, e cada ocorrência custava uma rodada.
     exemplo_run_json=(
         '{"cmd": ["/app/node_modules/.bin/next", "start", "-p", 3000], '
         '"port": 3000, "health_path": "/"}'

@@ -332,3 +332,11 @@ def test_nextjs_ensina_a_receita_de_interacao_que_roda_na_jaula():
                    "IS_REACT_ACT_ENVIRONMENT", "createRoot", '"submit"'):
         assert trecho.replace('\\"', '"') in instrucoes, trecho
     assert "jsdom" in perfis.obter("nextjs").ambiente_testes
+
+
+def test_executor_nextjs_recebe_a_regra_de_contraste_nos_dois_temas():
+    """Threads `d4a926e5` e `594ca62f`: o mesmo achado visual duas vezes — o
+    subtítulo colorido escuro sobre o fundo escuro (2,55:1 e 2,26:1). O
+    executor pensava a cor de destaque só para o tema claro."""
+    instrucoes = perfis.obter("nextjs").instrucoes_executor
+    assert "4,5:1" in instrucoes and "DOIS temas" in instrucoes
