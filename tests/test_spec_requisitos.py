@@ -77,3 +77,15 @@ def test_executor_nextjs_declara_o_fundo_no_body():
     from src.squad.adaptadores import perfis
     instrucoes = perfis.obter("nextjs").instrucoes_executor
     assert "declarados no `body`" in instrucoes and "não conta" in instrucoes
+
+
+def test_qa_nao_testa_aparencia():
+    """Thread `3842268c`: com o fundo no `body` e a verificação visual verde,
+    um teste que lia o CSS exigia `background` em `.page`, e a única rodada
+    extra foi o executor duplicando o fundo para agradá-lo."""
+    from src.squad.adaptadores import perfis
+    receita = perfis.obter("nextjs").instrucoes_qa
+    assert "NÃO escreva teste de aparência" in receita
+    assert "(CSS, JSON)" not in receita  # a receita não sugere mais ler CSS
+    descricao = TASKS_CFG["escrever_testes"]["description"]
+    assert "Não leia" in descricao and "arquivo de estilo" in descricao

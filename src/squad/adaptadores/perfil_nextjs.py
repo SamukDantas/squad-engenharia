@@ -246,11 +246,17 @@ PERFIL = PerfilStack(
         "  - para enviar, dispare `new Event(\"submit\", {bubbles: true, "
         "cancelable: true})` no `<form>`, dentro de `act`;\n"
         "  - desmonte no `afterEach` com `act(() => raiz.unmount())`;\n"
-        "  - para ler um arquivo do projeto (CSS, JSON) num arquivo jsdom, use "
+        "  - para ler um arquivo de dados do projeto (JSON) num arquivo jsdom, use "
         "`readFileSync(join(process.cwd(), \"<caminho a partir da raiz>\"), "
         "\"utf8\")`. NÃO use `new URL(..., import.meta.url)`: no jsdom o `URL` "
         "global é outro, e o `readFileSync` o recusa com \"The URL must be of "
         "scheme file\".\n"
+        "NÃO escreva teste de aparência: nada de ler CSS, conferir cor, fundo, "
+        "tema escuro ou contraste, nem classe de estilo. Isso é medido pela "
+        "verificação visual, que renderiza a página num navegador real nos dois "
+        "temas. Teste que lê o CSS cobra ONDE o estilo foi declarado, e não se a "
+        "página ficou legível: falha com a página certa e manda o executor mudar "
+        "o CSS para agradar o teste.\n"
         "Texto formatado por `Intl` (`Intl.NumberFormat`, `toLocaleString`, "
         "datas) usa espaço NÃO separável: em pt-BR, moeda sai como "
         "`R$\\u00a01.120,00`, não `R$ 1.120,00`. Declare no topo do arquivo "
@@ -275,6 +281,11 @@ PERFIL = PerfilStack(
     # criou o `normalizar`, usou no texto da página inteira e leu as linhas da
     # tabela por `.textContent` cru — mesma rodada extra. Daí o helper único
     # para toda leitura e, do lado do executor, o espaço comum na exibição.
+    # A proibição de teste de aparência veio da thread `3842268c` (dashboard,
+    # a execução seguinte à regra do fundo no `body`): o executor declarou o
+    # fundo no `body`, a verificação visual passou de primeira, e um teste do
+    # QA que lia o CSS exigia `background` em `.page`. A única rodada extra
+    # foi o executor pondo o fundo também no `.page` para agradar o teste.
     # A regra do fundo no `body` veio da thread `af83302f` (dashboard): o
     # executor declarou o fundo num `.page` de CSS Module, como a spec sugeria,
     # a verificação visual reprovou por `fundo_nao_declarado` e, por rodar por

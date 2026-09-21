@@ -126,6 +126,9 @@ escrever_testes:
     de tabelas, ordem das seções, tags e classes só entram no teste quando
     um requisito as fixa. Um teste de estrutura falha com o comportamento
     certo, e a rodada de correção reorganiza a página para agradá-lo.
+    Aparência também não se testa aqui: cor, fundo, tema escuro, contraste e
+    layout são medidos pela verificação visual num navegador real. Não leia
+    arquivo de estilo num teste, mesmo que um requisito fale de cores.
     Valor esperado que a spec não traz literalmente (um cenário que você
     inventou) é calculado com um comando do terminal, nunca de cabeça: um
     número errado no teste custa rodadas do desenvolvedor tentando
