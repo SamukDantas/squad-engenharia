@@ -253,17 +253,22 @@ PERFIL = PerfilStack(
         "scheme file\".\n"
         "Texto formatado por `Intl` (`Intl.NumberFormat`, `toLocaleString`, "
         "datas) usa espaço NÃO separável: em pt-BR, moeda sai como "
-        "`R$\\u00a01.120,00`, não `R$ 1.120,00`. Ao comparar texto da página "
-        "com um valor escrito à mão, normalize antes: "
-        "`texto.replace(/[\\u00a0\\u202f]/g, \" \")`. Sem isso o teste falha "
-        "com o código certo, e a rodada de correção vai mexer no código para "
+        "`R$\\u00a01.120,00`, não `R$ 1.120,00`. Declare no topo do arquivo "
+        "um helper `const texto = (el) => (el?.textContent ?? \"\")"
+        ".replace(/[\\u00a0\\u202f]/g, \" \")` e leia TODO texto da página por "
+        "ele — página inteira, linha de tabela, célula, alerta. Nenhuma "
+        "asserção sobre `.textContent` cru. Sem isso o teste falha com o "
+        "código certo, e a rodada de correção vai mexer no código para "
         "agradar o teste."
     ),
     # A regra do espaço não separável entrou depois da thread `d1b5175b`: 4
     # testes da página esperavam "R$ 1.120,00" com espaço comum, o
     # `Intl.NumberFormat` da jaula produz U+00A0 (conferido no node da imagem),
     # e a única rodada de correção da execução foi o executor trocando o
-    # formatador para bater com o teste.
+    # formatador para bater com o teste. Na execução seguinte (`6d6839ac`) o QA
+    # criou o `normalizar`, usou no texto da página inteira e leu as linhas da
+    # tabela por `.textContent` cru — mesma rodada extra. Daí o helper único
+    # para toda leitura e, do lado do executor, o espaço comum na exibição.
     # Medido: sem a receita acima, o QA da calculadora de juros (thread
     # `d4a926e5`) só testou a página de forma estática, e o guard de critérios
     # reprovou a suíte quatro vezes pedindo teste de interação — que o jsdom da
@@ -295,7 +300,12 @@ PERFIL = PerfilStack(
         "página tiver tema escuro, escolha as cores dele de propósito (tons "
         "claros sobre fundo escuro); não reaproveite a cor de destaque do tema "
         "claro. O pipeline renderiza a página nos dois temas e mede o contraste "
-        "de cada texto: abaixo de 4,5:1, a entrega volta para correção."
+        "de cada texto: abaixo de 4,5:1, a entrega volta para correção.\n"
+        "- Valor formatado por `Intl` (moeda, número, data) é exibido com "
+        "espaço comum, como o pedido escreve (`R$ 1.126,83`): o `Intl` insere "
+        "espaço não separável (U+00A0 ou U+202F), então aplique "
+        "`.replace(/[\\u00a0\\u202f]/g, \" \")` no texto formatado antes de "
+        "exibi-lo."
     ),
     # A regra de contraste acima entrou depois de duas execuções seguidas da
     # calculadora de juros (threads `d4a926e5` e `594ca62f`) caírem no mesmo
