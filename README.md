@@ -334,7 +334,12 @@ Três telas:
   por desfecho, stack, período e "só com teto", e paginação de 20, 50 ou 100
   linhas. Os cartões resumem o conjunto filtrado: filtrar por um pedido
   responde como aquele pedido evoluiu. Os filtros ficam guardados na sessão
-  do navegador, e voltar do detalhe mantém a página.
+  do navegador, e voltar do detalhe mantém a página. Cada linha tem um botão
+  **excluir**, que pede confirmação e move as métricas para `metrics/lixeira/`
+  e o workspace para `workspace/.lixeira/`, com os ramos de uma execução
+  paralela junto. Nada é apagado: para recuperar uma thread, mova os arquivos
+  de volta (sem o sufixo de data). Execução em curso não pode ser excluída, e
+  o checkpoint no SQLite continua lá.
 - **Linha do tempo** — uma faixa por nó no eixo do tempo real, colorida pelo
   veredito, com separadores de rodada. Os vãos entre as barras são tempo **fora**
   dos nós: gate humano, queda do provedor, retomada manual.
@@ -361,11 +366,13 @@ fora da squad na mesma janela entra na diferença. Se a janela zerar no meio da
 execução, a diferença não é reportada. A leitura nunca derruba a execução: sem
 resposta do app-server, o marco simplesmente sai sem o campo.
 
-Read-only por construção: o escritor único de `metrics/` continua sendo o
-`metricas.py`, e o painel só abre arquivo para leitura. Serve execução viva
+Read-only por construção, exceto a exclusão, que só move para a lixeira: o
+escritor único de `metrics/` continua sendo o `metricas.py`. Serve execução viva
 (atualiza sozinho a cada 3s) e histórico antigo pelo mesmo caminho, porque a
 fonte é o disco e não o processo do grafo. Sobe só em `127.0.0.1` — não tem
-autenticação e expõe o pedido e os vereditos da execução.
+autenticação e expõe o pedido e os vereditos da execução. A exclusão exige o
+cabeçalho `X-Painel`, que outra página aberta no navegador não consegue mandar
+sem uma autorização de CORS que o painel nunca dá.
 
 Sem servidor, o mesmo dado agregado sai em JSON:
 

@@ -1,8 +1,9 @@
 """Painel de métricas: a leitura das execuções que o resumo do terminal não dá.
 
-Read-only por construção. O escritor único de `metrics/` continua sendo o
-`metricas.py`; este módulo abre arquivo apenas para leitura, nunca para escrita.
-A separação é a mesma que o grafo já usa entre quem produz e quem julga.
+Read-only por construção, com uma exceção: a exclusão de uma thread, que
+**move** métricas e workspace para a lixeira e nunca apaga (`excluir_execucao`).
+Fora isso, o escritor único de `metrics/` continua sendo o `metricas.py`, e a
+separação é a mesma que o grafo já usa entre quem produz e quem julga.
 
 Serve execução viva e histórico morto pelo mesmo caminho, porque a fonte é o
 disco e não o processo do grafo: dá para abrir o painel no meio de uma execução,
@@ -15,6 +16,7 @@ Uso (a partir da raiz do projeto):
 """
 import argparse
 import json
+import shutil
 import threading
 import unicodedata
 from datetime import datetime
@@ -387,6 +389,63 @@ def consultar_execucoes(diretorio: Path, filtros: dict | None = None) -> dict:
     }
 
 
+# ---------- exclusão ----------
+
+DIR_WORKSPACE = Path("workspace")
+# Subpastas que o painel e a squad não leem: `listar_execucoes` só olha a raiz
+# de `metrics/`, e nenhuma thread se chama `.lixeira`.
+LIXEIRA_METRICAS = "lixeira"
+LIXEIRA_WORKSPACE = ".lixeira"
+
+
+class ExclusaoRecusada(Exception):
+    """A thread não pode sair agora; a mensagem diz por quê."""
+
+
+def excluir_execucao(diretorio: Path, thread_id: str,
+                     dir_workspace: Path = DIR_WORKSPACE) -> dict:
+    """Tira a thread do painel movendo métricas e workspace para a lixeira.
+
+    Mover, e não apagar: um clique errado numa tabela de dezenas de linhas não
+    pode custar o histórico de uma execução. Esvaziar a lixeira é decisão de
+    quem opera a máquina, fora do painel.
+
+    Vão junto os arquivos dos ramos de uma execução paralela
+    (`<thread>--<serviço>`), que o painel lista como threads próprias mas
+    nascem da mesma. O checkpoint no SQLite fica: sem métricas a thread some
+    do painel, e retomá-la continua possível.
+
+    Execução em curso é recusada: o processo do grafo recriaria o arquivo de
+    métricas no evento seguinte, e o workspace estaria em uso.
+    """
+    detalhe = detalhar(diretorio, thread_id)
+    if detalhe is None:
+        raise ExclusaoRecusada("execução desconhecida")
+    if detalhe["desfecho"] == "em_curso":
+        raise ExclusaoRecusada(
+            "a execução está em curso: interrompa o processo antes de excluí-la"
+        )
+    carimbo = datetime.now().strftime("%Y%m%d-%H%M%S")
+    movidos: list[str] = []
+    destinos = (
+        (diretorio, diretorio / LIXEIRA_METRICAS, f"{thread_id}.json", f"{thread_id}--*.json"),
+        (dir_workspace, dir_workspace / LIXEIRA_WORKSPACE, thread_id, f"{thread_id}--*"),
+    )
+    for raiz, lixeira, exato, ramos in destinos:
+        for origem in [raiz / exato, *sorted(raiz.glob(ramos))]:
+            if not origem.exists():
+                continue
+            lixeira.mkdir(parents=True, exist_ok=True)
+            destino = lixeira / f"{origem.stem}.{carimbo}{origem.suffix}"
+            shutil.move(str(origem), str(destino))
+            movidos.append(str(destino))
+    with _TRAVA_LINHAS:
+        for chave in [c for c in _LINHAS if Path(c).stem.split("--")[0] == thread_id]:
+            del _LINHAS[chave]
+    _ULTIMO_BOM.pop(thread_id, None)
+    return {"thread_id": thread_id, "movidos": movidos}
+
+
 # ---------- servidor ----------
 
 class _Painel(BaseHTTPRequestHandler):
@@ -411,6 +470,37 @@ class _Painel(BaseHTTPRequestHandler):
             "application/json; charset=utf-8",
             status,
         )
+
+    def do_DELETE(self) -> None:  # noqa: N802 (assinatura da stdlib)
+        """Exclui (move para a lixeira) uma thread: `DELETE /api/execucao/<id>`.
+
+        O painel escuta só em 127.0.0.1, mas qualquer página aberta no
+        navegador consegue mandar requisição para lá. Exigir o cabeçalho
+        `X-Painel` fecha isso: requisição de outra origem com cabeçalho próprio
+        passa por preflight de CORS, que este servidor nunca autoriza. A
+        `Origin`, quando vem, também tem de ser a do próprio painel.
+        """
+        rota = self.path.split("?", 1)[0]
+        if not rota.startswith("/api/execucao/"):
+            self._json({"erro": "rota desconhecida"}, 404)
+            return
+        origem = self.headers.get("Origin")
+        host = self.headers.get("Host", "")
+        if self.headers.get("X-Painel") != "1" or (origem and origem != f"http://{host}"):
+            self._json({"erro": "requisição recusada"}, 403)
+            return
+        thread_id = rota[len("/api/execucao/"):]
+        conhecidos = {a.stem for a in self.diretorio.glob("*.json")}
+        if thread_id not in conhecidos:
+            self._json({"erro": "execução desconhecida"}, 404)
+            return
+        try:
+            self._json(excluir_execucao(self.diretorio, thread_id, DIR_WORKSPACE))
+        except ExclusaoRecusada as e:
+            self._json({"erro": str(e)}, 409)
+        except OSError as e:
+            # Windows recusa mover pasta com arquivo aberto (container, editor).
+            self._json({"erro": f"não foi possível mover: {e}"}, 500)
 
     def do_GET(self) -> None:  # noqa: N802 (assinatura da stdlib)
         rota = self.path.split("?", 1)[0]

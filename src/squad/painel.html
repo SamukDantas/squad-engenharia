@@ -60,6 +60,13 @@
   /* Cabeçalho de coluna numérica alinhado com os valores, à direita: alinhado
      à esquerda sobre números à direita, ele parecia colado no vizinho. */
   th.num { text-align: right; }
+  td.acoes { white-space: nowrap; }
+  button.excluir {
+    background: none; border: 1px solid var(--borda); color: var(--fraco);
+    border-radius: 4px; padding: 2px 8px; cursor: pointer; font: inherit; font-size: 11px;
+  }
+  button.excluir:hover:not(:disabled) { color: var(--vermelho); border-color: var(--vermelho); }
+  button.excluir:disabled { opacity: .4; cursor: not-allowed; }
   tbody tr.clicavel { cursor: pointer; }
   tbody tr.clicavel:hover td { background: var(--papel); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -293,10 +300,11 @@ async function verHistorico() {
         el("td", { class: "tetos", text: [...new Set(e.tetos)].join(", ") || "—" }),
         el("td", { class: "num", text: mil(e.tokens) }),
         el("td", { class: "num", text: e.cota_pts == null ? "—" : `+${e.cota_pts}` }),
+        el("td", { class: "acoes" }, botaoExcluir(e, carregar)),
       ])
     );
     tabela.replaceChildren(el("div", { class: "rolagem" }, el("table", {}, [
-      el("thead", {}, el("tr", {}, ["quando", "thread", "pedido", "desfecho", "wall", "nós", "retrab.", "rodadas", "cob.", "tetos", "tokens", "cota"]
+      el("thead", {}, el("tr", {}, ["quando", "thread", "pedido", "desfecho", "wall", "nós", "retrab.", "rodadas", "cob.", "tetos", "tokens", "cota", ""]
         .map(cabecalho))),
       el("tbody", {}, corpo),
     ])));
@@ -341,6 +349,39 @@ function celulaThread(e) {
     el("code", { text: e.thread_id.slice(0, 8) }),
     ...origem.map((linha) => el("div", { class: "origem", text: linha })),
   ]);
+}
+
+// Exclusão de uma thread. O servidor move métricas e workspace para a lixeira;
+// nada é apagado. Execução em curso não sai: o grafo recriaria o arquivo.
+function botaoExcluir(e, recarregar) {
+  const emCurso = e.desfecho === "em_curso";
+  const b = el("button", {
+    class: "excluir", text: "excluir", "aria-label": `excluir a thread ${e.thread_id}`,
+    title: emCurso ? "Execução em curso: interrompa o processo antes de excluí-la." : "Mover para a lixeira",
+    onclick: async (ev) => {
+      ev.stopPropagation();  // o clique na linha abre o detalhe
+      const pedido = (e.pedido || "").slice(0, 120);
+      const ok = confirm(
+        `Excluir a thread ${e.thread_id}?\n\n${pedido}\n\n`
+        + "Métricas e workspace vão para a lixeira (metrics/lixeira e workspace/.lixeira), "
+        + "de onde podem ser recuperados."
+      );
+      if (!ok) return;
+      b.disabled = true;
+      const r = await fetch(`/api/execucao/${encodeURIComponent(e.thread_id)}`, {
+        method: "DELETE", headers: { "X-Painel": "1" },
+      });
+      if (!r.ok) {
+        const corpo = await r.json().catch(() => ({}));
+        alert(`Não foi possível excluir: ${corpo.erro || r.status}`);
+        b.disabled = false;
+        return;
+      }
+      recarregar();
+    },
+  });
+  b.disabled = emCurso;
+  return b;
 }
 
 // Cabeçalho de tabela; o das colunas numéricas alinha à direita, com os valores.
