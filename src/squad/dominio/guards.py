@@ -208,3 +208,25 @@ def _citado_na_spec(caminho: str, spec: str) -> bool:
         re.search(rf"(?<![\w./-]){re.escape(alvo)}(?![\w-])", spec)
         for alvo in {caminho, nome}
     )
+
+
+# ---------- QA que mexe fora da suíte ----------
+
+def fora_da_suite(
+    antes: Mapping[str, str], depois: Mapping[str, str], e_teste
+) -> tuple[list[str], list[str]]:
+    """O que o QA mexeu fora da suíte: (alterados ou apagados, criados).
+
+    `antes` e `depois` mapeiam caminho para o hash do conteúdo. Espelho da
+    regra do executor (`testes_do_executor`): quem implementa não escreve
+    teste, e quem testa não reescreve o código. Com o QA do CrewAI isso era
+    garantido pelas ferramentas; com o QA rodando pelo Codex no workspace,
+    ele pode editar qualquer arquivo, e sem esta conferência um QA que
+    "corrige" o código para o teste passar apagaria a separação entre quem
+    implementa e quem valida.
+    """
+    alterados = sorted(
+        a for a, h in antes.items() if not e_teste(a) and depois.get(a) != h
+    )
+    criados = sorted(a for a in depois if a not in antes and not e_teste(a))
+    return alterados, criados

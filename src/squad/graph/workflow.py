@@ -30,11 +30,12 @@ from ..crews.qualidade import crew_revisao, crew_testes
 from ..deploy import executar_deploy
 from ..dominio import guards, nomes, orcamento, rotas
 from ..dominio.vereditos import justificativa, veredito_aprovado, veredito_sim
-from ..llm import squad_llm
+from ..llm import provedor, squad_llm
 from ..adaptadores import perfis
 from ..adaptadores.config_spring import medir_ambientes
 from ..adaptadores.metricas_json import medir, registrar
-from ..adaptadores.codex_cli import executar_codex
+from ..adaptadores.codex_cli import executar_codex, executar_qa as executar_qa_codex
+from ..crews.base import TASKS_CFG
 from ..adaptadores.opencode_cli import executar_opencode
 from ..pentest import executar_pentest, habilitado as pentest_habilitado
 from ..resiliencia import com_retry
@@ -757,6 +758,45 @@ def _feedback_para_qa(state: EstadoProjeto, perfil) -> str:
     )
 
 
+def _conteudos(workspace: str, perfil) -> dict[str, bytes]:
+    raiz = Path(workspace)
+    return {a: (raiz / a).read_bytes() for a in _arquivos_do_workspace(workspace, perfil)}
+
+
+def _qa_pelo_codex(state: EstadoProjeto, perfil, entradas: dict) -> None:
+    """O QA rodando pelo Codex no workspace, com o código da entrega protegido.
+
+    A tarefa é a mesma `escrever_testes` do `tasks.yaml`, preenchida com as
+    mesmas entradas do QA do CrewAI. Depois, tudo o que ele mudou fora da suíte
+    é desfeito (guards.fora_da_suite): arquivo alterado ou apagado volta ao
+    conteúdo de antes, arquivo novo que não é teste sai.
+    """
+    ws = state["workspace"]
+    antes = _conteudos(ws, perfil)
+    descricao = TASKS_CFG["escrever_testes"]["description"].format_map(entradas)
+    executar_qa_codex(ws, descricao)
+
+    depois = _conteudos(ws, perfil)
+    alterados, criados = guards.fora_da_suite(
+        {a: hashlib.sha256(c).hexdigest() for a, c in antes.items()},
+        {a: hashlib.sha256(c).hexdigest() for a, c in depois.items()},
+        perfil.e_teste,
+    )
+    raiz = Path(ws)
+    for rel in alterados:
+        (raiz / rel).parent.mkdir(parents=True, exist_ok=True)
+        (raiz / rel).write_bytes(antes[rel])
+    for rel in criados:
+        (raiz / rel).unlink(missing_ok=True)
+    if alterados or criados:
+        print(
+            f">>> QA mexeu fora da suíte — desfeito (o código é do executor): "
+            f"restaurados {alterados or '-'}, removidos {criados or '-'}"
+        )
+        registrar(state["thread_id"], "qa_fora_da_suite_desfeito",
+                  restaurados=alterados, removidos=criados)
+
+
 def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     perfil = _perfil(state)
     arquivos_antes = "\n".join(state.get("arquivos", []))
@@ -766,14 +806,18 @@ def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
             + len(arquivos_antes)
             + len(state.get("feedback_qa", ""))
         ))
-        com_retry("escrita de testes", lambda: crew_testes(state["workspace"]).kickoff(
-            inputs={
-                **_do_perfil(perfil),
-                "spec": state["spec"],
-                "arquivos": arquivos_antes or "(workspace vazio)",
-                "feedback_qa": _feedback_para_qa(state, perfil),
-            }
-        ), caro=True)
+        entradas = {
+            **_do_perfil(perfil),
+            "spec": state["spec"],
+            "arquivos": arquivos_antes or "(workspace vazio)",
+            "feedback_qa": _feedback_para_qa(state, perfil),
+        }
+        if provedor() == "codex":
+            _qa_pelo_codex(state, perfil, entradas)
+        else:
+            com_retry("escrita de testes", lambda: crew_testes(state["workspace"]).kickoff(
+                inputs=entradas
+            ), caro=True)
     # Revarre o workspace: os testes agora fazem parte da entrega e entram
     # no dump que o revisor recebe.
     arquivos = _arquivos_do_workspace(state["workspace"], perfil)
@@ -800,11 +844,17 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
         m.update(chars_contexto=len(state["spec"][:6000]) + len(testes))
         veredito = com_retry("guard de critérios", lambda: squad_llm().call(
             "Você é um verificador rigoroso de testes. Os testes abaixo "
-            "verificam de fato os critérios de aceite da especificação — "
-            "cobrindo o comportamento exigido, e não apenas asserções triviais "
-            "ou detalhes irrelevantes? Responda SIM ou NAO sozinho na primeira "
-            "linha. Se NAO, liste nas linhas seguintes, em até 5 itens curtos, "
-            "os critérios de aceite que a suíte não verifica."
+            "verificam de fato os critérios de aceite FUNCIONAIS da "
+            "especificação — o comportamento observável que ela exige "
+            "(entradas e saídas, valores esperados, erros e recusas) —, e não "
+            "apenas asserções triviais? Julgue SÓ comportamento. Requisitos "
+            "de estrutura, estilo, tipagem, dependências ou organização do "
+            "código (\"usa só a biblioteca padrão\", \"sem estado global\", "
+            "\"anotações de tipo\") NÃO são critério desta pergunta: não se "
+            "verificam por teste de comportamento e são julgados pela revisão. "
+            "Responda SIM ou NAO sozinho na primeira linha. Se NAO, liste nas "
+            "linhas seguintes, em até 5 itens curtos, os comportamentos "
+            "exigidos que a suíte não verifica."
             f"\n\nEspecificação:\n{state['spec'][:6000]}"
             f"\n\nTestes:\n{testes}"
         ))

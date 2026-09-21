@@ -106,6 +106,12 @@ def test_todo_kickoff_espalha_os_campos_do_perfil():
     exatamente o buraco que derrubou a execução da stack nextjs."""
     fonte = (RAIZ / "src/squad/graph/workflow.py").read_text(encoding="utf-8")
     kickoffs = re.findall(r"\.kickoff\(\s*\n?\s*inputs=\{(.*?)\}", fonte, re.DOTALL)
+    # Entradas montadas antes numa variável (o QA monta uma vez e usa nos dois
+    # caminhos, CrewAI e Codex): a variável tem de espalhar o perfil.
+    for nome in re.findall(r"\.kickoff\(\s*\n?\s*inputs=(\w+)", fonte):
+        definicao = re.search(rf"{nome} = \{{(.*?)\}}", fonte, re.DOTALL)
+        assert definicao, f"inputs={nome} sem definição literal no fonte"
+        kickoffs.append(definicao.group(1))
     assert len(kickoffs) == 4, f"esperava 4 crews, achei {len(kickoffs)}"
     for i, corpo in enumerate(kickoffs):
         assert "_do_perfil(" in corpo, f"kickoff #{i + 1} não espalha o perfil"

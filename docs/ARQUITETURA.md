@@ -27,7 +27,7 @@ sequenceDiagram
     participant R as Crew Revisão (revisor LLM)
     participant PN as Pentest em sandbox isolado (rede --internal, sem egress)
     participant DP as Deploy
-    participant LP as Provedor LLM (LLM_PROVEDOR: gateway corporativo on-prem | OpenCode Zen)
+    participant LP as Provedor LLM (LLM_PROVEDOR: Codex CLI | gateway corporativo on-prem | OpenCode Zen)
     participant KC as Keycloak do gateway corporativo (token em ~/.config/opencode)
 
     U->>G: python main.py "pedido"
