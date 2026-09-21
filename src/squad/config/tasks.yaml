@@ -88,7 +88,8 @@ escrever_testes:
     existem. Não use dependências além de {libs_permitidas} e do próprio
     runner de testes.
     Se houver retorno de uma rodada anterior (abaixo), trate-o como
-    prioridade: reescreva ou complemente os testes conforme apontado.
+    prioridade: complemente ou corrija os testes conforme apontado, sem
+    regravar os arquivos que não precisam mudar.
     Spec: {spec}
     Retorno da rodada anterior (se houver): {feedback_qa}
   expected_output: >

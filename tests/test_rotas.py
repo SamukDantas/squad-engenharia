@@ -68,12 +68,43 @@ def test_sem_suite_no_workspace_o_qa_precisa_escrever():
     assert d.destino == "escrever_testes"
 
 
-def test_rodada_inicial_e_correcao_de_teste_reescrevem_a_suite():
-    for origem in ("", "testes"):
-        d = rotas.pos_desenvolvimento(
-            estado(origem_feedback=origem, arquivos=["app.py", "tests/t.py"])
-        )
-        assert d.destino == "escrever_testes", origem
+def test_rodada_inicial_escreve_a_suite():
+    d = rotas.pos_desenvolvimento(
+        estado(origem_feedback="", arquivos=["app.py", "tests/t.py"])
+    )
+    assert d.destino == "escrever_testes"
+
+
+def test_correcao_de_assercao_vermelha_preserva_a_suite():
+    """Calculadora de juros (thread `00b92498`): três passadas do QA somaram
+    52 dos 73 min de nós, reescrevendo a suíte a cada rodada nascida de teste
+    vermelho. O código mudou; a suíte precisa rodar de novo, não ser escrita."""
+    d = rotas.pos_desenvolvimento(estado(
+        origem_feedback="testes", arquivos=["app.py", "tests/t.py"],
+        saida_testes="E       assert 3 == 4\nFAILED tests/t.py::test_x - AssertionError",
+    ))
+    assert d.destino == "executar_testes"
+    assert d.aviso and "suíte preservada" in d.aviso
+
+
+def test_correcao_de_build_quebrado_preserva_a_suite():
+    """Nenhum teste rodou: a suíte nem chegou a ser julgada, e não há por que
+    reescrevê-la."""
+    d = rotas.pos_desenvolvimento(estado(
+        origem_feedback="testes", arquivos=["app.py", "tests/t.py"], falha_de_build=True,
+    ))
+    assert d.destino == "executar_testes"
+
+
+def test_vermelho_de_import_ou_coleta_volta_ao_qa():
+    """Aí o teste costuma apontar para um módulo que não existe, e quem
+    conserta é o QA — não o executor."""
+    for saida in ("ModuleNotFoundError: No module named 'calc'",
+                  "ERROR collecting tests/t.py"):
+        d = rotas.pos_desenvolvimento(estado(
+            origem_feedback="testes", arquivos=["app.py", "tests/t.py"], saida_testes=saida,
+        ))
+        assert d.destino == "escrever_testes", saida
 
 
 def test_convencao_de_teste_e_injetavel():

@@ -67,7 +67,7 @@ sequenceDiagram
         G->>WS: varre o disco: manifesto + dump do código
         G->>CK: salva checkpoint
         Note over V,R: guards, QA e revisão usam o mesmo squad_llm() → LP<br/>com Zen: chave OPENCODE_API_KEY + header x-opencode-session
-        opt rodada nascida de reprovação de revisão
+        opt rodada nascida de revisão, pentest, visual ou teste vermelho (asserção ou build)
             Note over G,PT: roteamento seletivo: suíte preservada —<br/>vai direto ao pytest, sem reescrever testes nem repagar o guard
         end
         loop máx. 2 reescritas da suíte
@@ -140,10 +140,15 @@ sequenceDiagram
    (determinística, depois) devolvem ao QA num laço curto, sem pagar outra
    rodada de desenvolvimento. A cobertura tem dois pisos — agregado e **por
    módulo** —, porque a média esconde justamente o arquivo central do pedido.
-7. **Roteamento seletivo por origem do feedback**: reprovação de revisão não
+7. **Roteamento seletivo por origem do feedback**: correção nascida de
+   revisão, pentest, visual ou **teste vermelho** (asserção ou build) não
    reescreve a suíte — volta ao desenvolvimento e segue direto ao pytest. O
    código mudou, então os testes precisam *rodar* de novo, não ser *escritos*
-   de novo; `escrever_testes` é o nó mais caro do grafo. O revisor recebe o
+   de novo; `escrever_testes` é o nó mais caro do grafo. Vermelho de import
+   ou coleta volta ao QA, porque aí o teste costuma apontar para o que não
+   existe. Quando o QA precisa agir com a suíte já no disco, ele recebe o
+   **modo ajuste** — mexer só no que o retorno aponta — e o guard de
+   critérios diz o que falta, em vez de mandar reescrever. O revisor recebe o
    próprio veredito anterior e só reprova por apontamento bloqueante, porque
    sinal caro e subjetivo não pode comandar o laço (RESILIENCIA.md, item 27).
 8. **Jaula de execução**: código gerado por LLM roda em container efêmero,

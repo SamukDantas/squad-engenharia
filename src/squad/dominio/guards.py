@@ -14,6 +14,7 @@ entrada é um manifesto, não um caminho.
 import re
 from typing import Callable, Mapping
 
+from . import vereditos
 from .rotas import MAX_REVISOES_SUITE, e_teste_padrao
 
 # Manifesto da entrega: caminho relativo -> o arquivo tem conteúdo?
@@ -102,29 +103,10 @@ def conferir_correcao(antes: Impressao, depois: Impressao, origem: str) -> str |
 # O teto (`MAX_REVISOES_SUITE`, em rotas) é uma revisão: mais que isso vira
 # dois agentes discordando em laço, e quem desempata é o humano.
 
-# Asserção que falhou: o teste rodou, comparou e discordou. É o único vermelho
-# em que o erro pode estar no próprio teste — expectativa errada, tolerância
-# rígida demais.
-_MARCAS_ASSERCAO = (
-    "AssertionError", "AssertionFailedError", "\nE       assert", "expected ",
-)
-# O teste nem chegou a comparar: import, sintaxe, tipo, coleta, nome indefinido.
-# Aqui não há o que o QA revisar — é código ou ambiente, e a rodada de correção
-# que não mexeu em nada continua sendo o erro que o guard acima descreve.
-_MARCAS_AMBIENTE = (
-    "ModuleNotFoundError", "ImportError", "Cannot find module",
-    "Failed to resolve import", "SyntaxError", "error TS", "ERROR collecting",
-    "no tests ran", "No test files found", "COMPILATION ERROR", "NameError",
-    "ReferenceError", "is not defined",
-)
-
-
-def falha_de_assercao(saida: str) -> bool:
-    """O vermelho veio de uma asserção, e só dela."""
-    saida = saida or ""
-    return any(m in saida for m in _MARCAS_ASSERCAO) and not any(
-        m in saida for m in _MARCAS_AMBIENTE
-    )
+# A classificação do vermelho (asserção x ambiente) mora em `vereditos`, que
+# não importa nada do domínio: `rotas` também precisa dela para decidir se a
+# suíte sobrevive a uma rodada de correção, e `rotas` não pode importar daqui.
+falha_de_assercao = vereditos.falha_de_assercao
 
 
 def destino_da_correcao_inerte(
