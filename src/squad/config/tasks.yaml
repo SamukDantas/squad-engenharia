@@ -121,6 +121,11 @@ escrever_testes:
     cobre.
     A seção "## Decisões de implementação" é sugestão do arquiteto, não
     critério: não gaste testes nela além do que os requisitos já pedem.
+    Na interface, verifique o CONTEÚDO que o requisito exige ver (cada
+    indicador, com o valor certo), não a organização da página: quantidade
+    de tabelas, ordem das seções, tags e classes só entram no teste quando
+    um requisito as fixa. Um teste de estrutura falha com o comportamento
+    certo, e a rodada de correção reorganiza a página para agradá-lo.
     Valor esperado que a spec não traz literalmente (um cenário que você
     inventou) é calculado com um comando do terminal, nunca de cabeça: um
     número errado no teste custa rodadas do desenvolvedor tentando
@@ -153,10 +158,10 @@ revisar:
     nenhum apontamento bloqueante, o veredito é APROVADO, mesmo que a lista
     de sugestões seja longa.
 
-    Desviar da seção "## Decisões de implementação" da spec NÃO é
-    bloqueante: são sugestões do arquiteto, e a entrega pode ter seguido
-    outro caminho — muitas vezes porque uma verificação por execução
-    (testes, verificação visual) exigiu. Na dúvida sobre se um item é
+    A spec abaixo traz só a seção "## Requisitos". As decisões de
+    implementação do arquiteto ficaram de fora de propósito: são sugestões,
+    e a entrega pode ter seguido outro caminho — muitas vezes porque uma
+    verificação por execução (testes, verificação visual) exigiu. Na dúvida sobre se um item é
     requisito ou decisão, confira se ele é rastreável a uma frase do pedido
     original; se não for, é sugestão. Exigir o contrário do que a verificação
     visual ou os testes cobraram faz o laço oscilar sem convergir.

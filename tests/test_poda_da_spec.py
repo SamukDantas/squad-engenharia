@@ -35,7 +35,9 @@ def test_arquiteto_nao_poe_teste_na_spec_nem_promove_escolha_a_requisito():
 def test_revisor_so_bloqueia_por_requisito_do_pedido():
     texto = TAREFAS["revisar"]["description"]
     assert "PEDIDO ORIGINAL" in texto
-    assert '"## Decisões de implementação" da spec NÃO é' in texto
+    # Desde a thread `af83302f` o revisor nem recebe as decisões: a tarefa
+    # diz que elas ficaram de fora e por quê.
+    assert 'A spec abaixo traz só a seção "## Requisitos"' in texto
 
 
 def test_revisor_recebe_o_pedido_original(monkeypatch, tmp_path):

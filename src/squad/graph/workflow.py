@@ -995,10 +995,16 @@ def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     """
     # Ainda é o relatório da rodada anterior: este nó só o sobrescreve ao retornar.
     anterior = (state.get("relatorio_qa") or "")[:LIMITE_REVISAO_ANTERIOR]
+    # Só os requisitos, como o guard de critérios. A regra de que decisão de
+    # implementação não bloqueia estava no prompt, e não bastou: na thread
+    # `af83302f` (dashboard Next.js) o revisor reprovou citando "a
+    # especificação exige" uma linha de "## Decisões de implementação", e a
+    # rodada extra levou a execução ao teto. Quem não vê a decisão não a cobra.
+    requisitos = spec_da_entrega.requisitos(state["spec"])
     with medir(_tid(state, config), "revisao") as m:
         m.update(chars_contexto=(
             len(state["codigo"])
-            + len(state["spec"])
+            + len(requisitos)
             + len(state.get("saida_testes", ""))
             + len(anterior)
         ))
@@ -1010,7 +1016,7 @@ def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
                 # está nela parece obrigação (ver tasks.yaml, `revisar`).
                 "pedido": state["pedido"],
                 "codigo": state["codigo"],
-                "spec": state["spec"],
+                "spec": requisitos,
                 "saida_testes": state.get("saida_testes", ""),
                 "revisao_anterior": anterior or "Nenhuma — primeira revisão.",
             }

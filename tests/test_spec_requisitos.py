@@ -50,3 +50,30 @@ def test_guard_de_criterios_recebe_so_os_requisitos():
 def test_qa_trata_decisoes_como_sugestao():
     descricao = TASKS_CFG["escrever_testes"]["description"]
     assert '"## Decisões de implementação" é sugestão do arquiteto' in descricao
+
+
+# ---------- thread af83302f (dashboard Next.js) ----------
+
+def test_revisor_recebe_so_os_requisitos():
+    """O revisor reprovou citando uma linha de "## Decisões de
+    implementação" como exigência da spec. Refeita com o mesmo código, a
+    revisão aprovou nas duas versões: a reprova era instável, e quem não vê
+    a decisão não a cobra."""
+    fonte = inspect.getsource(workflow.no_revisao)
+    assert "spec_da_entrega.requisitos(state[\"spec\"])" in fonte
+    assert '"spec": requisitos' in fonte
+
+
+def test_qa_testa_conteudo_e_nao_a_organizacao_da_pagina():
+    """O teste exigia 4 tabelas (número das decisões); o requisito só dizia
+    "em tabelas". A rodada de correção reorganizou a página."""
+    descricao = TASKS_CFG["escrever_testes"]["description"]
+    assert "não a organização da página" in descricao
+
+
+def test_executor_nextjs_declara_o_fundo_no_body():
+    """O fundo foi num `.page` de CSS Module, e a verificação visual, que mede
+    o body, reprovou por `fundo_nao_declarado` no fim da execução."""
+    from src.squad.adaptadores import perfis
+    instrucoes = perfis.obter("nextjs").instrucoes_executor
+    assert "declarados no `body`" in instrucoes and "não conta" in instrucoes
