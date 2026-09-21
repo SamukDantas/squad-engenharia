@@ -1290,6 +1290,17 @@ enriquecer o *como*, mas não pode aumentar o *o quê*. E um juiz que só vê a
 interpretação não consegue separar o que foi pedido do que foi inventado: ele
 precisa ver a fonte.
 
+**Estendido ao guard de critérios (21/09):** a separação valia para o
+revisor, mas o guard de critérios continuava recebendo a spec inteira. Na
+API de reserva de salas (thread `05762b4b`), ele reprovou a primeira suíte
+por não testar que o campo `usuario` do corpo é ignorado, uma linha de
+"## Decisões de implementação". O custo foi uma passada inteira do QA, de uns
+270 mil tokens, a maior parte da execução. Agora o guard recebe só
+"## Requisitos" (`dominio/spec.py`), e o QA trata as decisões como sugestão.
+A conferência custou duas chamadas ao guard, sem rodar a squad: com a suíte
+publicada sem os testes extras, a spec inteira dá NAO e só os requisitos
+dão SIM.
+
 ---
 
 ## 38. O provedor que custava a hora
