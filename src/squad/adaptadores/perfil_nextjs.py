@@ -87,7 +87,10 @@ def _e_teste(caminho: str) -> bool:
 # existe pela mesma lição (RESILIENCIA.md, item 20): arquivo que nunca é
 # importado fica em 0% e sequestra o piso por módulo — o QA seria mandado
 # escrever teste para um arquivo de configuração. Medido na mesma execução:
-# `next.config.mjs` apareceu como pior módulo a 0,0%.
+# `next.config.mjs` apareceu como pior módulo a 0,0%. O `layout.tsx` entrou
+# pelo mesmo motivo: é a moldura do App Router (`<html>`, `<body>`, metadata),
+# sem lógica, e na calculadora de juros (thread `d4a926e5`) ficou a 0,0% com a
+# cobertura agregada em 91,2%, reprovando o piso por módulo sozinho.
 #
 # Objeto simples em vez de `defineConfig`: sem import, sem resolução de módulo a
 # partir de um diretório que não é o do projeto.
@@ -107,7 +110,10 @@ export default {
         "**/*.spec.*",
         "**/*.config.*",
         "**/.next/**",
-        "**/dist/**"
+        "**/dist/**",
+        "**/*.d.ts",
+        "**/layout.tsx",
+        "**/layout.jsx"
       ]
     }
   }
@@ -223,7 +229,33 @@ PERFIL = PerfilStack(
     instrucoes_qa=(
         "Escreva testes vitest ao lado de cada módulo, com sufixo "
         "`.test.ts` ou `.test.tsx`. Eles serão executados pelo vitest a "
-        "partir da raiz do workspace."
+        "partir da raiz do workspace.\n"
+        "Componente com interação (formulário, clique, digitação) é testado "
+        "com DOM de verdade, não só com `renderToStaticMarkup`. Não há "
+        "@testing-library; use esta receita, que roda nesta jaula:\n"
+        "  - primeira linha do arquivo: `// @vitest-environment jsdom`;\n"
+        "  - `import { act } from \"react\"` e `import { createRoot } from "
+        "\"react-dom/client\"`;\n"
+        "  - `globalThis.IS_REACT_ACT_ENVIRONMENT = true` antes de montar;\n"
+        "  - monte com `act(() => createRoot(el).render(<Comp />))` num "
+        "`div` anexado ao `document.body`;\n"
+        "  - para digitar, chame o setter nativo de `value` "
+        "(`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "
+        "\"value\").set`) e dispare `new Event(\"input\", {bubbles: true})`, "
+        "dentro de `act`;\n"
+        "  - para enviar, dispare `new Event(\"submit\", {bubbles: true, "
+        "cancelable: true})` no `<form>`, dentro de `act`;\n"
+        "  - desmonte no `afterEach` com `act(() => raiz.unmount())`."
+    ),
+    # Medido: sem a receita acima, o QA da calculadora de juros (thread
+    # `d4a926e5`) só testou a página de forma estática, e o guard de critérios
+    # reprovou a suíte quatro vezes pedindo teste de interação — que o jsdom da
+    # imagem sempre permitiu.
+    ambiente_testes=(
+        "vitest 2.1.8 com jsdom 25 e react-dom 18 (sem @testing-library): "
+        "lógica pura, renderização estática e interação com DOM (digitar, "
+        "clicar, enviar formulário) são testáveis; navegação real entre "
+        "páginas e APIs do navegador fora do DOM não são."
     ),
     instrucoes_executor=(
         "- TypeScript/React apenas, usando somente estas libs já instaladas, "

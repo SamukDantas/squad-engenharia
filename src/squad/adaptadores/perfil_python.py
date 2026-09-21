@@ -165,6 +165,10 @@ PERFIL = PerfilStack(
         "Escreva testes pytest no diretório `tests/`. Eles serão executados "
         "com pytest a partir da raiz do workspace."
     ),
+    ambiente_testes=(
+        f"pytest com a biblioteca padrão e {_LIBS}, sem rede: lógica, erros e, "
+        "em API, requisições pelo cliente de teste do framework são testáveis."
+    ),
     instrucoes_executor=(
         "- Python apenas, usando somente a biblioteca padrão e estas libs já "
         f"instaladas: {_LIBS}. Não use nenhuma outra dependência.\n"

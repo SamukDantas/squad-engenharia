@@ -215,6 +215,10 @@ PERFIL = PerfilStack(
     preparo_alvo="mvn -o -B -q package -DskipTests && ",
     dockerfile_alvo="Dockerfile.target-java",
     libs_permitidas=_LIBS,
+    ambiente_testes=(
+        "JUnit 5 com Maven offline e as dependências do pom: regras de domínio "
+        "com JUnit puro, e controller, JSON e JPA com o contexto do Spring."
+    ),
     instrucoes_qa=(
         "Escreva testes JUnit 5 em `src/test/java/`, espelhando o pacote da "
         "classe testada. Eles serão executados por `mvn test`.\n"

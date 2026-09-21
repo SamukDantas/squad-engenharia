@@ -174,3 +174,9 @@ def test_pentest_sem_run_json_nao_tem_o_que_atacar(tmp_path):
     from src.squad import pentest
     resultado = pentest.executar_pentest(str(tmp_path), "t", PYTHON)
     assert resultado == {"pentest_ok": True, "vulnerabilidades": []}
+
+
+def test_guard_de_criterios_recebe_o_ambiente_de_testes():
+    import inspect
+    fonte = inspect.getsource(workflow.no_validacao_testes)
+    assert "ambiente_testes" in fonte and "Só " in fonte
