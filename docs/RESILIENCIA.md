@@ -1246,6 +1246,49 @@ desistir — com teto, para a discordância não virar laço.
 
 ---
 
+## 37. A spec que inventou requisitos, e o revisor que os cobrou
+
+**Sintoma:** dois casos, na mesma semana. Na calculadora de juros (thread
+`33c19d49`), com testes verdes e verificação visual verde, o revisor reprovou
+duas vezes seguidas por "cor definida em CSS global". A verificação visual
+tinha reprovado a versão anterior por falta de `background-color` na raiz; o
+desenvolvedor declarou o fundo no `globals.css`; o revisor mandou tirar. Fazer
+o que o revisor pedia trazia de volta o achado visual — o laço não tinha saída
+e terminou no gate humano. No conversor de temperaturas (thread `055e0f17`),
+a spec listava `test_temperatura.py` como parte da entrega: o executor o
+escreveu, a regra que remove teste do executor o apagaria (item 36 e PR #33),
+e o QA já tinha um teste que o importava.
+
+**Causa raiz:** o arquiteto escrevia requisito e decisão de implementação no
+mesmo nível. "Nenhuma cor em CSS global" era uma escolha dele — o pedido só
+dizia "declarar background e color próprios e continuar legível no tema
+escuro". E o revisor tinha como motivo de reprova "(c) violação direta de um
+requisito da spec", sem ver o pedido original: tudo o que estava na spec
+parecia obrigação. Uma escolha do arquiteto ganhava poder de bloquear, e mais
+poder que a verificação por execução que a contradizia.
+
+**Solução:** a spec passa a ter duas seções — "## Requisitos", só o que é
+rastreável a uma frase do pedido, e "## Decisões de implementação",
+sugestões que a entrega pode não seguir. O arquiteto fica proibido de pôr
+arquivos de teste na spec e de promover escolha de implementação a requisito,
+e a spec declara que as verificações por execução têm precedência sobre as
+decisões dela. O revisor recebe o pedido original e só bloqueia por requisito
+do pedido ou da seção "## Requisitos"; desviar das decisões vira sugestão.
+
+**Ainda não validado em execução:** a mudança é de prompt, e prompt é pedido,
+não garantia. Ela reduz a classe de conflito, mas só uma execução real
+mostra se o arquiteto obedece à separação e se o revisor para de cobrar
+decisão. Os PRs #33 (teste citado pela spec é preservado) e #29 (impasse vai
+ao gate com diagnóstico) seguem como rede, caso não obedeçam.
+
+**Princípio:** **quem define o requisito é o pedido, não quem escreve a
+spec.** Cada camada que acrescenta interpretação — o arquiteto — pode
+enriquecer o *como*, mas não pode aumentar o *o quê*. E um juiz que só vê a
+interpretação não consegue separar o que foi pedido do que foi inventado: ele
+precisa ver a fonte.
+
+---
+
 ## Resumo da arquitetura de defesa em camadas
 
 ```

@@ -859,6 +859,10 @@ def no_revisao(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
         resultado = com_retry("revisão", lambda: crew_revisao().kickoff(
             inputs={
                 **_do_perfil(_perfil(state)),
+                # O pedido separa requisito de decisão inventada pelo
+                # arquiteto: sem ele, o revisor só tem a spec, e tudo o que
+                # está nela parece obrigação (ver tasks.yaml, `revisar`).
+                "pedido": state["pedido"],
                 "codigo": state["codigo"],
                 "spec": state["spec"],
                 "saida_testes": state.get("saida_testes", ""),
