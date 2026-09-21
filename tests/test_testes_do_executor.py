@@ -39,6 +39,28 @@ def test_so_os_testes_novos_sao_do_executor():
     assert guards.testes_do_executor(antes, depois, E_TESTE) == ["test_temperatura.py"]
 
 
+def test_arquivo_pedido_pela_spec_e_entrega_nao_rastro():
+    """Thread `055e0f17`: a spec listava `test_temperatura.py` como parte da
+    entrega e o QA escreveu um teste que o importava. Removê-lo quebrou a
+    suíte; dentro do laço, a regra o apagaria a cada rodada."""
+    spec = "## Arquivos\n- `temperatura.py`\n- `test_temperatura.py` com unittest"
+    assert guards.testes_do_executor(set(), ["temperatura.py", "test_temperatura.py"],
+                                     E_TESTE, spec=spec) == []
+
+
+def test_spec_que_cita_outro_arquivo_nao_protege_este():
+    """Fronteira de palavra: `test_a.py` na spec não protege `test_abc.py`, nem
+    `tests/test_temp.py` protege um `test_temp.py` na raiz sem ser citado."""
+    spec = "Inclua test_a.py e tests/test_temp.py"
+    depois = ["test_abc.py", "test_a.py"]
+    assert guards.testes_do_executor(set(), depois, E_TESTE, spec=spec) == ["test_abc.py"]
+
+
+def test_nome_citado_sem_pasta_protege_o_arquivo_em_subpasta():
+    spec = "O pacote traz um test_x.py de exemplo."
+    assert guards.testes_do_executor(set(), ["pkg/test_x.py"], E_TESTE, spec=spec) == []
+
+
 def test_sem_teste_novo_nada_e_removido():
     assert guards.testes_do_executor({"tests/a.py"}, ["app.py", "tests/a.py"], E_TESTE) == []
 
@@ -62,3 +84,20 @@ def test_no_apaga_o_teste_do_executor_e_preserva_o_resto(tmp_path, monkeypatch):
     assert not (ws / "test_temperatura.py").exists()
     assert (ws / "tests" / "test_qa.py").exists()
     assert (ws / "temperatura.py").exists()
+
+
+def test_no_preserva_o_teste_que_a_spec_pediu(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "temperatura.py").write_text("def c(): ...", encoding="utf-8")
+    (ws / "test_temperatura.py").write_text("def test_x(): ...", encoding="utf-8")
+
+    workflow._remover_testes_do_executor(
+        {"workspace": str(ws), "thread_id": "t",
+         "spec": "Entregue `temperatura.py` e `test_temperatura.py`."},
+        set(),
+        perfis.obter("python"),
+    )
+
+    assert (ws / "test_temperatura.py").exists()
