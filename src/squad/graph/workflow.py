@@ -29,6 +29,7 @@ from ..crews.planejamento import crew_planejamento
 from ..crews.qualidade import crew_revisao, crew_testes
 from ..deploy import executar_deploy
 from ..dominio import guards, nomes, orcamento, rotas
+from ..dominio import spec as spec_da_entrega
 from ..dominio.vereditos import (
     justificativa,
     trecho_da_falha,
@@ -917,8 +918,14 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
         print(">>> Guard de critérios: nenhum arquivo de teste encontrado.")
         return {"testes_aderentes": False}
 
+    # Só os requisitos: as decisões de implementação são sugestões do
+    # arquiteto, e julgadas como critério viravam cobrança. Medido na thread
+    # `05762b4b` (API de reserva de salas): o guard reprovou a primeira suíte
+    # por não testar que o campo `usuario` do corpo é ignorado — uma decisão
+    # da spec, não uma frase do pedido — e custou uma passada inteira do QA.
+    requisitos = spec_da_entrega.requisitos(state["spec"])[:6000]
     with medir(_tid(state, config), "validacao_testes") as m:
-        m.update(chars_contexto=len(state["spec"][:6000]) + len(testes))
+        m.update(chars_contexto=len(requisitos) + len(testes))
         veredito = com_retry("guard de critérios", lambda: squad_llm().call(
             "Você é um verificador rigoroso de testes. Os testes abaixo "
             "verificam de fato os critérios de aceite FUNCIONAIS da "
@@ -944,7 +951,7 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
             "Responda SIM ou NAO sozinho na primeira linha. Se NAO, liste nas "
             "linhas seguintes, em até 5 itens curtos, os comportamentos "
             "exigidos que a suíte não verifica."
-            f"\n\nEspecificação:\n{state['spec'][:6000]}"
+            f"\n\nRequisitos da especificação:\n{requisitos}"
             f"\n\nTestes:\n{testes}"
         ))
         aderentes = veredito_sim(veredito)

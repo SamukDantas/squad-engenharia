@@ -108,7 +108,8 @@ escrever_testes:
     runner de testes.
     A suíte precisa passar pelo verificador de critérios de primeira: cada
     passada extra custa uma rodada inteira. Antes de terminar, percorra CADA
-    critério de aceite e cada requisito funcional da spec e confirme que um
+    critério de aceite e cada requisito funcional da seção "## Requisitos"
+    da spec e confirme que um
     teste o verifica com asserção sobre o valor real, no nível em que ele é
     observável: regra de cálculo ou de validação, no módulo; o que a spec
     diz que a interface mostra, exibe ou recusa, num teste da interface —
@@ -118,6 +119,8 @@ escrever_testes:
     módulo, quando a spec o exige também na interface, conta como faltando.
     Termine o manifesto com uma linha por critério: critério → teste que o
     cobre.
+    A seção "## Decisões de implementação" é sugestão do arquiteto, não
+    critério: não gaste testes nela além do que os requisitos já pedem.
     Valor esperado que a spec não traz literalmente (um cenário que você
     inventou) é calculado com um comando do terminal, nunca de cabeça: um
     número errado no teste custa rodadas do desenvolvedor tentando
