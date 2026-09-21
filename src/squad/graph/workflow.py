@@ -634,6 +634,9 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
     antes = (
         _impressao_entrega(state["workspace"], perfil) if origem != "inicial" else None
     )
+    testes_antes = {
+        a for a in _arquivos_do_workspace(state["workspace"], perfil) if perfil.e_teste(a)
+    }
     with medir(
         _tid(state, config), "desenvolvimento", executor=executor, origem=origem
     ) as m:
@@ -659,6 +662,7 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
                 f"DEV_EXECUTOR inválido: '{executor}'. Use 'opencode', 'codex' "
                 "ou 'crews'."
             )
+    _remover_testes_do_executor(state, testes_antes, perfil)
     # O que vale é o que está no disco: o manifesto do estado vem de uma
     # varredura determinística do workspace, não do texto do executor.
     arquivos = _arquivos_do_workspace(state["workspace"], perfil)
@@ -676,6 +680,21 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         "testes_tentativas": 0,
         **extra,
     }
+
+
+def _remover_testes_do_executor(state: EstadoProjeto, antes: set[str], perfil) -> None:
+    """Apaga os testes que o executor criou (guards.testes_do_executor)."""
+    raiz = Path(state["workspace"])
+    novos = guards.testes_do_executor(antes, _arquivos_do_workspace(raiz, perfil), perfil.e_teste)
+    if not novos:
+        return
+    for rel in novos:
+        (raiz / rel).unlink(missing_ok=True)
+    print(
+        f">>> Executor escreveu {len(novos)} arquivo(s) de teste, proibido pela "
+        f"tarefa — removidos (a suíte é do QA): {', '.join(novos)}"
+    )
+    registrar(state["thread_id"], "testes_do_executor_removidos", arquivos=novos)
 
 
 def _correcao_inerte(
