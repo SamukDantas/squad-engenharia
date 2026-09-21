@@ -119,3 +119,43 @@ def justificativa(resposta: object) -> str:
     resto = texto[primeira.end():] if primeira else ""
     # Só o separador sai: o hífen de uma lista é conteúdo, não pontuação.
     return resto.lstrip(" \t\r\n:").rstrip()[:LIMITE_JUSTIFICATIVA]
+
+
+# ---------- o trecho da falha que vai para as métricas ----------
+
+LIMITE_TRECHO_FALHA = 2_000
+
+# Linhas que dizem por que falhou, nos formatos das três stacks: tsc/next,
+# vitest, pytest, Maven. O resto da saída (banner, lista de rotas, progresso)
+# só empurra a causa para fora do limite.
+_LINHA_DE_ERRO = (
+    "error", "Error", "ERROR", "FAIL", "Failed", "failed", "×",
+    "Type error", "Cannot find", "not defined", "Traceback", "E   ",
+    "expected", "BUILD FAILURE", "COMPILATION",
+)
+
+
+def trecho_da_falha(saida: str, limite: int = LIMITE_TRECHO_FALHA) -> str:
+    """O pedaço da saída que explica uma falha de build ou de teste.
+
+    Existe porque a causa se perdia: a saída de cada rodada fica no estado e é
+    sobrescrita pela seguinte, e as métricas só guardavam `testes_ok`. Medido
+    em três execuções seguidas da calculadora de juros: o build quebrou na
+    primeira rodada, a seguinte corrigiu, e quando alguém foi olhar não havia
+    mais o que ler.
+
+    Prioriza as linhas de erro, com a anterior e a seguinte como contexto: o
+    `next build` põe o arquivo (`./app/page.test.tsx:8:1`) na linha de cima da
+    mensagem, e o pytest põe o trecho de código na de cima do `E   `. Sem
+    nenhuma linha reconhecida, fica o fim da saída, que é onde runners e
+    compiladores põem o resumo.
+    """
+    linhas = (saida or "").splitlines()
+    escolhidas: list[str] = []
+    for i, linha in enumerate(linhas):
+        if any(m in linha for m in _LINHA_DE_ERRO):
+            escolhidas.extend(linhas[max(0, i - 1):i + 2])
+    trecho = "\n".join(dict.fromkeys(l for l in escolhidas if l.strip()))
+    if not trecho:
+        return (saida or "")[-limite:]
+    return trecho[:limite]

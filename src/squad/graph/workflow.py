@@ -29,7 +29,12 @@ from ..crews.planejamento import crew_planejamento
 from ..crews.qualidade import crew_revisao, crew_testes
 from ..deploy import executar_deploy
 from ..dominio import guards, nomes, orcamento, rotas
-from ..dominio.vereditos import justificativa, veredito_aprovado, veredito_sim
+from ..dominio.vereditos import (
+    justificativa,
+    trecho_da_falha,
+    veredito_aprovado,
+    veredito_sim,
+)
 from ..llm import provedor, squad_llm
 from ..adaptadores import perfis
 from ..adaptadores.config_spring import medir_ambientes
@@ -309,6 +314,14 @@ def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
             cobertura_pior=resultado.cobertura.pior,
             cobertura_pior_arquivo=resultado.cobertura.pior_arquivo,
         )
+        if not resultado.testes_ok:
+            # A saída fica no estado e a rodada seguinte a sobrescreve; sem
+            # isto, a causa de um vermelho corrigido depois se perde
+            # (vereditos.trecho_da_falha).
+            m.update(
+                falha_de_build=resultado.falha_de_build,
+                trecho_falha=trecho_da_falha(resultado.saida),
+            )
 
     campos = resultado.como_estado(LIMITE_SAIDA)
     saida = campos["saida_testes"]
