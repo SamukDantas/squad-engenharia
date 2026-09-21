@@ -250,8 +250,20 @@ PERFIL = PerfilStack(
         "`readFileSync(join(process.cwd(), \"<caminho a partir da raiz>\"), "
         "\"utf8\")`. NÃO use `new URL(..., import.meta.url)`: no jsdom o `URL` "
         "global é outro, e o `readFileSync` o recusa com \"The URL must be of "
-        "scheme file\"."
+        "scheme file\".\n"
+        "Texto formatado por `Intl` (`Intl.NumberFormat`, `toLocaleString`, "
+        "datas) usa espaço NÃO separável: em pt-BR, moeda sai como "
+        "`R$\\u00a01.120,00`, não `R$ 1.120,00`. Ao comparar texto da página "
+        "com um valor escrito à mão, normalize antes: "
+        "`texto.replace(/[\\u00a0\\u202f]/g, \" \")`. Sem isso o teste falha "
+        "com o código certo, e a rodada de correção vai mexer no código para "
+        "agradar o teste."
     ),
+    # A regra do espaço não separável entrou depois da thread `d1b5175b`: 4
+    # testes da página esperavam "R$ 1.120,00" com espaço comum, o
+    # `Intl.NumberFormat` da jaula produz U+00A0 (conferido no node da imagem),
+    # e a única rodada de correção da execução foi o executor trocando o
+    # formatador para bater com o teste.
     # Medido: sem a receita acima, o QA da calculadora de juros (thread
     # `d4a926e5`) só testou a página de forma estática, e o guard de critérios
     # reprovou a suíte quatro vezes pedindo teste de interação — que o jsdom da

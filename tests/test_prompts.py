@@ -130,3 +130,13 @@ def test_nenhuma_tarefa_cita_stack_fixa_no_texto():
         if termo.lower() in (tarefa.get(campo) or "").lower()
     ]
     assert not achados, f"stack fixa no tasks.yaml: {achados}"
+
+
+def test_qa_confere_cada_criterio_antes_de_entregar():
+    """Nas threads `47339386` e `d1b5175b` o guard de critérios reprovou a
+    primeira suíte por falta de teste da página (mensagens de erro, valores
+    exibidos, atualização após digitar). O QA recebe a mesma régua do guard
+    e fecha o manifesto com a matriz critério → teste."""
+    descricao = _tasks()["escrever_testes"]["description"]
+    assert "critério → teste" in descricao
+    assert "cada mensagem de" in descricao and "erro de cada entrada inválida" in descricao

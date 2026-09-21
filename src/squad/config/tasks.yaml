@@ -106,6 +106,18 @@ escrever_testes:
     Importe os módulos pelos caminhos reais e não invente módulos que não
     existem. Não use dependências além de {libs_permitidas} e do próprio
     runner de testes.
+    A suíte precisa passar pelo verificador de critérios de primeira: cada
+    passada extra custa uma rodada inteira. Antes de terminar, percorra CADA
+    critério de aceite e cada requisito funcional da spec e confirme que um
+    teste o verifica com asserção sobre o valor real, no nível em que ele é
+    observável: regra de cálculo ou de validação, no módulo; o que a spec
+    diz que a interface mostra, exibe ou recusa, num teste da interface —
+    cada valor exibido (resultados e cada coluna de tabela), cada mensagem de
+    erro de cada entrada inválida, os casos de borda (zero, vazio) e a
+    atualização depois que o usuário muda a entrada. Critério citado só no
+    módulo, quando a spec o exige também na interface, conta como faltando.
+    Termine o manifesto com uma linha por critério: critério → teste que o
+    cobre.
     Se houver retorno de uma rodada anterior (abaixo), trate-o como
     prioridade: complemente ou corrija os testes conforme apontado, sem
     regravar os arquivos que não precisam mudar.

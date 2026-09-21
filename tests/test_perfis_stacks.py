@@ -350,3 +350,12 @@ def test_receita_proibe_import_meta_url_para_ler_arquivo_no_jsdom():
     instrucoes = perfis.obter("nextjs").instrucoes_qa
     assert "process.cwd()" in instrucoes
     assert "NÃO use `new URL(..., import.meta.url)`" in instrucoes
+
+
+def test_receita_normaliza_o_espaco_nao_separavel_do_intl():
+    """Thread `d1b5175b`: 4 testes da página esperavam "R$ 1.120,00" com
+    espaço comum; o `Intl.NumberFormat` da jaula produz U+00A0. O código estava
+    certo, e a única rodada de correção foi o executor trocando o formatador
+    para agradar o teste."""
+    instrucoes = perfis.obter("nextjs").instrucoes_qa
+    assert r"\u00a0" in instrucoes and r".replace(/[\u00a0\u202f]/g" in instrucoes
