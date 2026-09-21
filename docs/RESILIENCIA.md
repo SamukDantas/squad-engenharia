@@ -1301,6 +1301,17 @@ A conferência custou duas chamadas ao guard, sem rodar a squad: com a suíte
 publicada sem os testes extras, a spec inteira dá NAO e só os requisitos
 dão SIM.
 
+**E ao revisor (21/09):** no dashboard Next.js (thread `af83302f`), o revisor
+reprovou citando "a especificação exige" uma linha de "## Decisões de
+implementação", apesar da regra no prompt dizendo que decisão não bloqueia.
+A rodada extra levou a execução ao teto. Agora o revisor também recebe só
+"## Requisitos". Refeita com o mesmo código, a revisão aprovou nas duas
+versões: a reprova era instável, e o efeito da mudança não foi medido. Ela
+fica porque juiz que não vê a decisão não consegue cobrá-la. Na mesma
+execução, o QA exigiu "quatro tabelas", número das decisões, onde o
+requisito dizia só "em tabelas". A regra agora é testar o conteúdo que o
+requisito manda ver, não a organização da página.
+
 ---
 
 ## 38. O provedor que custava a hora

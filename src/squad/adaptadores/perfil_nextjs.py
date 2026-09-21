@@ -275,6 +275,10 @@ PERFIL = PerfilStack(
     # criou o `normalizar`, usou no texto da página inteira e leu as linhas da
     # tabela por `.textContent` cru — mesma rodada extra. Daí o helper único
     # para toda leitura e, do lado do executor, o espaço comum na exibição.
+    # A regra do fundo no `body` veio da thread `af83302f` (dashboard): o
+    # executor declarou o fundo num `.page` de CSS Module, como a spec sugeria,
+    # a verificação visual reprovou por `fundo_nao_declarado` e, por rodar por
+    # último, a reprova chegou com o orçamento de correção esgotado.
     # O `data-testid` veio da thread `9a86ddb0`: o QA selecionou `.amount`,
     # a página usava `className={styles.amount}` (CSS Module), o seletor voltou
     # vazio em 4 testes e o executor gastou a rodada criando classes globais.
@@ -310,6 +314,13 @@ PERFIL = PerfilStack(
         "claros sobre fundo escuro); não reaproveite a cor de destaque do tema "
         "claro. O pipeline renderiza a página nos dois temas e mede o contraste "
         "de cada texto: abaixo de 4,5:1, a entrega volta para correção.\n"
+        "- O fundo e a cor do texto da página são declarados no `body` (em "
+        "`app/globals.css`, importado pelo `app/layout.tsx`), com as cores "
+        "redefinidas em `@media (prefers-color-scheme: dark)`. Fundo só num "
+        "contêiner da página (um `.page` com `min-height: 100vh`) não conta: "
+        "o pipeline mede o `body` e a raiz, e sem fundo neles o canvas do "
+        "navegador inverte com o tema. Vale mesmo que a spec sugira declarar "
+        "os estilos \"no escopo da página\".\n"
         "- Valor formatado por `Intl` (moeda, número, data) é exibido com "
         "espaço comum, como o pedido escreve (`R$ 1.126,83`): o `Intl` insere "
         "espaço não separável (U+00A0 ou U+202F), então aplique "
