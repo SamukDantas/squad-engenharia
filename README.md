@@ -330,6 +330,11 @@ Três telas:
   título; reexecução mostra a origem): wall-clock, share de retrabalho,
   rodadas, cobertura final, desfecho e tetos atingidos. É a tela que responde
   "a mudança melhorou?", comparando execuções em vez de descrever uma.
+  Tem busca por pedido ou id (sem diferenciar maiúscula nem acento), filtro
+  por desfecho, stack, período e "só com teto", e paginação de 20, 50 ou 100
+  linhas. Os cartões resumem o conjunto filtrado: filtrar por um pedido
+  responde como aquele pedido evoluiu. Os filtros ficam guardados na sessão
+  do navegador, e voltar do detalhe mantém a página.
 - **Linha do tempo** — uma faixa por nó no eixo do tempo real, colorida pelo
   veredito, com separadores de rodada. Os vãos entre as barras são tempo **fora**
   dos nós: gate humano, queda do provedor, retomada manual.
@@ -367,6 +372,12 @@ Sem servidor, o mesmo dado agregado sai em JSON:
 ```bash
 python -m src.squad.painel --json <thread_id>
 ```
+
+A listagem também sai por HTTP, filtrada e paginada:
+`/api/execucoes?busca=&desfecho=&stack=&desde=AAAA-MM-DD&ate=AAAA-MM-DD&com_teto=1&pagina=1&por_pagina=20`.
+Cada linha é recalculada só quando o arquivo da thread muda. Com o poll de 3
+s, reagregar o histórico inteiro a cada abertura ficaria mais caro a cada
+execução guardada.
 
 Execuções anteriores à instrumentação aparecem como `indeterminado`: elas não
 têm o marco de fim, e chamá-las de "em curso" faria a taxa de conclusão mentir.

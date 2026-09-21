@@ -91,6 +91,17 @@
   svg text { font: 11px ui-monospace, Menlo, monospace; fill: var(--texto); }
   svg text.fraco { fill: var(--fraco); }
   .vazio { color: var(--fraco); padding: 20px 0; }
+
+  .filtros { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 12px; }
+  .filtros input, .filtros select, .paginacao select {
+    background: var(--papel); color: var(--texto); border: 1px solid var(--borda);
+    border-radius: 4px; padding: 4px 8px; font: inherit; font-size: 12px;
+  }
+  .filtros input.busca { flex: 1 1 220px; min-width: 0; }
+  .filtros .campo { color: var(--fraco); font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+  .paginacao { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; color: var(--fraco); font-size: 12px; }
+  .paginacao button:disabled { opacity: .4; cursor: default; }
+  .rolagem { overflow-x: auto; }
 </style>
 </head>
 <body>
@@ -161,58 +172,145 @@ const buscar = async (rota) => {
 
 // ---------- tela 3: histórico ----------
 
+// Filtros da tela inicial. Guardados na sessão para o "← todas" voltar à
+// mesma página e ao mesmo recorte; a sessão pode estar indisponível (janela
+// privada, armazenamento bloqueado), e aí o painel só começa sem filtro.
+const FILTROS_VAZIOS = { busca: "", desfecho: "", stack: "", desde: "", ate: "", com_teto: "", pagina: 1, por_pagina: 20 };
+let filtros = (() => {
+  try { return { ...FILTROS_VAZIOS, ...JSON.parse(sessionStorage.getItem("painel.filtros") || "{}") }; }
+  catch { return { ...FILTROS_VAZIOS }; }
+})();
+const guardarFiltros = () => {
+  try { sessionStorage.setItem("painel.filtros", JSON.stringify(filtros)); } catch { /* sem sessão */ }
+};
+
+const consulta = () => {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(filtros)) if (v !== "" && v != null) q.set(k, v);
+  return `/api/execucoes?${q}`;
+};
+
 async function verHistorico() {
   clearTimeout(timer);
   location.hash = "";
   subtitulo.textContent = "";
-  const execucoes = await buscar("/api/execucoes");
 
-  if (!execucoes.length) {
-    tela.replaceChildren(el("p", { class: "vazio", text: "Nenhuma execução em metrics/." }));
-    return;
-  }
+  const cartoes = el("div", { class: "cartoes" });
+  const titulo = el("h2");
+  const tabela = el("div");
+  const paginacao = el("div", { class: "paginacao" });
+  const selDesfecho = el("select", { "aria-label": "desfecho" });
+  const selStack = el("select", { "aria-label": "stack" });
 
-  const total = execucoes.length;
-  const comDeploy = execucoes.filter((e) => e.desfecho === "deploy").length;
-  const comTeto = execucoes.filter((e) => e.tetos.length).length;
-  const retrabalho = execucoes.reduce((a, e) => a + e.retrabalho_s, 0);
-  const nosTotal = execucoes.reduce((a, e) => a + e.tempo_nos_s, 0);
+  const mudar = (campo, valor) => {
+    filtros = { ...filtros, [campo]: valor, pagina: campo === "pagina" ? valor : 1 };
+    guardarFiltros();
+    carregar();
+  };
 
-  const cartoes = el("div", { class: "cartoes" }, [
-    cartao("Execuções", total),
-    cartao("Chegaram ao deploy", `${comDeploy} (${pct(comDeploy, total)}%)`),
-    cartao("Pararam por teto", `${comTeto} (${pct(comTeto, total)}%)`),
-    cartao("Tempo em retrabalho", `${pct(retrabalho, nosTotal)}%`),
+  let espera = null;
+  const busca = el("input", {
+    type: "search", placeholder: "pedido ou id da thread", value: filtros.busca,
+    "aria-label": "buscar", class: "busca",
+    oninput: (ev) => { clearTimeout(espera); espera = setTimeout(() => mudar("busca", ev.target.value), 300); },
+  });
+  const data = (campo, rotulo) => el("label", { class: "campo" }, [
+    document.createTextNode(rotulo),
+    el("input", { type: "date", value: filtros[campo], onchange: (ev) => mudar(campo, ev.target.value) }),
+  ]);
+  const teto = el("input", { type: "checkbox", onchange: (ev) => mudar("com_teto", ev.target.checked ? "1" : "") });
+  teto.checked = Boolean(filtros.com_teto);
+  selDesfecho.addEventListener("change", (ev) => mudar("desfecho", ev.target.value));
+  selStack.addEventListener("change", (ev) => mudar("stack", ev.target.value));
+
+  const barra = el("div", { class: "filtros" }, [
+    busca, selDesfecho, selStack, data("desde", "de "), data("ate", "até "),
+    el("label", { class: "campo" }, [teto, document.createTextNode(" só com teto")]),
+    el("button", {
+      class: "voltar", text: "limpar",
+      onclick: () => { filtros = { ...FILTROS_VAZIOS, por_pagina: filtros.por_pagina }; guardarFiltros(); verHistorico(); },
+    }),
   ]);
 
-  const corpo = execucoes.map((e) =>
-    el("tr", { class: "clicavel", onclick: () => verExecucao(e.thread_id) }, [
-      el("td", { text: e.inicio.replace("T", " ").slice(0, 16) }),
-      celulaThread(e),
-      el("td", { class: "truncar", title: e.pedido || e.thread_id, text: e.pedido || "(sem pedido registrado)" }),
-      el("td", {}, seloDesfecho(e.desfecho)),
-      el("td", { class: "num", text: dur(e.wall_s) }),
-      el("td", { class: "num", text: dur(e.tempo_nos_s) }),
-      el("td", { class: "num", text: e.tempo_nos_s ? `${pct(e.retrabalho_s, e.tempo_nos_s)}%` : "—" }),
-      el("td", { class: "num", text: e.rodadas }),
-      el("td", { class: "num", text: e.cobertura == null ? "—" : `${e.cobertura}%` }),
-      el("td", { text: e.tetos.join(", ") || "—" }),
-      el("td", { class: "num", text: mil(e.tokens) }),
-      el("td", { class: "num", text: e.cota_pts == null ? "—" : `+${e.cota_pts}` }),
-    ])
-  );
+  const opcoes = (sel, valores, rotuloTodos, atual) => {
+    sel.replaceChildren(
+      el("option", { value: "", text: rotuloTodos }),
+      ...valores.map((v) => el("option", { value: v, text: v })),
+    );
+    sel.value = atual;
+  };
+
+  async function carregar() {
+    const r = await buscar(consulta());
+    filtros.pagina = r.pagina;  // o servidor corrige página fora do intervalo
+    opcoes(selDesfecho, r.opcoes.desfechos, "todos os desfechos", filtros.desfecho);
+    opcoes(selStack, r.opcoes.stacks, "todas as stacks", filtros.stack);
+
+    const s = r.resumo;
+    cartoes.replaceChildren(
+      cartao("Execuções", s.execucoes),
+      cartao("Chegaram ao deploy", `${s.deploy} (${pct(s.deploy, s.execucoes)}%)`),
+      cartao("Pararam por teto", `${s.teto} (${pct(s.teto, s.execucoes)}%)`),
+      cartao("Tempo em retrabalho", `${pct(s.retrabalho_s, s.tempo_nos_s)}%`),
+    );
+    titulo.textContent = r.total === r.total_geral
+      ? `${r.total} execuções`
+      : `${r.total} de ${r.total_geral} execuções`;
+
+    if (!r.itens.length) {
+      tabela.replaceChildren(el("p", {
+        class: "vazio",
+        text: r.total_geral ? "Nenhuma execução passa no filtro." : "Nenhuma execução em metrics/.",
+      }));
+      paginacao.replaceChildren();
+      return;
+    }
+
+    const corpo = r.itens.map((e) =>
+      el("tr", { class: "clicavel", onclick: () => verExecucao(e.thread_id) }, [
+        el("td", { text: e.inicio.replace("T", " ").slice(0, 16) }),
+        celulaThread(e),
+        el("td", { class: "truncar", title: e.pedido || e.thread_id, text: e.pedido || "(sem pedido registrado)" }),
+        el("td", {}, seloDesfecho(e.desfecho)),
+        el("td", { class: "num", text: dur(e.wall_s) }),
+        el("td", { class: "num", text: dur(e.tempo_nos_s) }),
+        el("td", { class: "num", text: e.tempo_nos_s ? `${pct(e.retrabalho_s, e.tempo_nos_s)}%` : "—" }),
+        el("td", { class: "num", text: e.rodadas }),
+        el("td", { class: "num", text: e.cobertura == null ? "—" : `${e.cobertura}%` }),
+        el("td", { text: e.tetos.join(", ") || "—" }),
+        el("td", { class: "num", text: mil(e.tokens) }),
+        el("td", { class: "num", text: e.cota_pts == null ? "—" : `+${e.cota_pts}` }),
+      ])
+    );
+    tabela.replaceChildren(el("div", { class: "rolagem" }, el("table", {}, [
+      el("thead", {}, el("tr", {}, ["quando", "thread", "pedido", "desfecho", "wall", "nós", "retrab.", "rodadas", "cob.", "tetos", "tokens", "cota"]
+        .map((t) => el("th", { text: t })))),
+      el("tbody", {}, corpo),
+    ])));
+
+    const botao = (texto, alvo, ativo) => {
+      const b = el("button", { class: "voltar", text: texto, onclick: () => mudar("pagina", alvo) });
+      b.disabled = !ativo;
+      return b;
+    };
+    const porPagina = el("select", { "aria-label": "por página", onchange: (ev) => mudar("por_pagina", Number(ev.target.value)) },
+      [20, 50, 100].map((n) => el("option", { value: n, text: `${n} por página` })));
+    porPagina.value = String(r.por_pagina);
+    paginacao.replaceChildren(
+      botao("« primeira", 1, r.pagina > 1),
+      botao("‹ anterior", r.pagina - 1, r.pagina > 1),
+      el("span", { text: `página ${r.pagina} de ${r.paginas}` }),
+      botao("próxima ›", r.pagina + 1, r.pagina < r.paginas),
+      botao("última »", r.paginas, r.pagina < r.paginas),
+      porPagina,
+    );
+  }
 
   tela.replaceChildren(
     el("section", {}, [el("h2", { text: "Série de execuções" }), cartoes]),
-    el("section", {}, [
-      el("h2", { text: `${total} execuções` }),
-      el("table", {}, [
-        el("thead", {}, el("tr", {}, ["quando", "thread", "pedido", "desfecho", "wall", "nós", "retrab.", "rodadas", "cob.", "tetos", "tokens", "cota"]
-          .map((t) => el("th", { text: t })))),
-        el("tbody", {}, corpo),
-      ]),
-    ])
+    el("section", {}, [titulo, barra, tabela, paginacao]),
   );
+  await carregar();
 }
 
 // Id curto na célula, o completo no título (e em Ctrl+C: o texto da célula é

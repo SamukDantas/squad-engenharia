@@ -15,9 +15,12 @@ Uso (a partir da raiz do projeto):
 """
 import argparse
 import json
+import threading
+import unicodedata
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs
 
 from .adaptadores.metricas_json import gasto_da_cota
 
@@ -254,33 +257,134 @@ def _cobertura_final(eventos: list[dict]) -> float | None:
     return testes[-1].get("cobertura") if testes else None
 
 
+# Linha da listagem por arquivo, recalculada só quando o arquivo muda. Sem
+# isto, cada abertura da tela inicial relia e reagregava o histórico inteiro,
+# e o custo crescia com o número de execuções guardadas.
+_LINHAS: dict[str, tuple[tuple[int, int], dict]] = {}
+_TRAVA_LINHAS = threading.Lock()
+
+POR_PAGINA_PADRAO = 20
+POR_PAGINA_MAXIMO = 100
+
+
+def _linha(diretorio: Path, arquivo: Path) -> dict | None:
+    thread_id = arquivo.stem
+    try:
+        stat = arquivo.stat()
+    except OSError:
+        return None
+    assinatura = (stat.st_mtime_ns, stat.st_size)
+    chave = str(arquivo.resolve())
+    with _TRAVA_LINHAS:
+        guardada = _LINHAS.get(chave)
+    if guardada and guardada[0] == assinatura:
+        return guardada[1]
+    detalhe = detalhar(diretorio, thread_id)
+    if not detalhe:
+        return None
+    eventos = _eventos(diretorio, thread_id)
+    inicios = [m for m in detalhe["marcos"] if m["evento"] == "inicio_execucao"]
+    linha = {
+        "thread_id": thread_id,
+        "pedido": detalhe["pedido"],
+        "stack": inicios[-1]["detalhe"].get("stack", "") if inicios else "",
+        "inicio": detalhe["inicio"],
+        "desfecho": detalhe["desfecho"],
+        "wall_s": detalhe["wall_s"],
+        "tempo_nos_s": detalhe["tempo_nos_s"],
+        "retrabalho_s": detalhe["retrabalho_s"],
+        "rodadas": len(detalhe["rodadas"]) - 1,
+        "tetos": [t["detalhe"].get("laco", "?") for t in detalhe["tetos"]],
+        "retomadas": detalhe["retomadas"],
+        "cobertura": _cobertura_final(eventos),
+        "tokens": detalhe["tokens"],
+        "reexecucao": _reexecucao(detalhe),
+        "cota_pts": (detalhe["cota"] or {}).get("gasto_pct"),
+    }
+    with _TRAVA_LINHAS:
+        _LINHAS[chave] = (assinatura, linha)
+    return linha
+
+
 def listar_execucoes(diretorio: Path) -> list[dict]:
     """Uma linha por execução, mais recente primeiro. É a tela que responde
     'a mudança melhorou?' — a que o resumo, olhando uma thread só, não pode."""
-    linhas = []
-    for arquivo in diretorio.glob("*.json"):
-        thread_id = arquivo.stem
-        detalhe = detalhar(diretorio, thread_id)
-        if not detalhe:
-            continue
-        eventos = _eventos(diretorio, thread_id)
-        linhas.append({
-            "thread_id": thread_id,
-            "pedido": detalhe["pedido"],
-            "inicio": detalhe["inicio"],
-            "desfecho": detalhe["desfecho"],
-            "wall_s": detalhe["wall_s"],
-            "tempo_nos_s": detalhe["tempo_nos_s"],
-            "retrabalho_s": detalhe["retrabalho_s"],
-            "rodadas": len(detalhe["rodadas"]) - 1,
-            "tetos": [t["detalhe"].get("laco", "?") for t in detalhe["tetos"]],
-            "retomadas": detalhe["retomadas"],
-            "cobertura": _cobertura_final(eventos),
-            "tokens": detalhe["tokens"],
-            "reexecucao": _reexecucao(detalhe),
-            "cota_pts": (detalhe["cota"] or {}).get("gasto_pct"),
-        })
+    linhas = [
+        linha for arquivo in diretorio.glob("*.json")
+        if (linha := _linha(diretorio, arquivo))
+    ]
     return sorted(linhas, key=lambda linha: linha["inicio"], reverse=True)
+
+
+def _dobrar(texto: str) -> str:
+    """Minúsculas e sem acento: "conversão" acha o pedido que diz "conversao"."""
+    decomposto = unicodedata.normalize("NFKD", texto or "")
+    return "".join(c for c in decomposto if not unicodedata.combining(c)).lower()
+
+
+def _casa(linha: dict, filtros: dict) -> bool:
+    busca = _dobrar(filtros.get("busca") or "").strip()
+    if busca and busca not in _dobrar(linha["thread_id"]) and busca not in _dobrar(linha["pedido"]):
+        return False
+    desfecho = filtros.get("desfecho") or ""
+    if desfecho and linha["desfecho"] != desfecho:
+        return False
+    stack = filtros.get("stack") or ""
+    if stack and linha["stack"] != stack:
+        return False
+    dia = linha["inicio"][:10]
+    if filtros.get("desde") and dia < filtros["desde"]:
+        return False
+    if filtros.get("ate") and dia > filtros["ate"]:
+        return False
+    if filtros.get("com_teto") and not linha["tetos"]:
+        return False
+    return True
+
+
+def _inteiro(valor, padrao: int, minimo: int, maximo: int) -> int:
+    try:
+        return max(minimo, min(maximo, int(valor)))
+    except (TypeError, ValueError):
+        return padrao
+
+
+def consultar_execucoes(diretorio: Path, filtros: dict | None = None) -> dict:
+    """A listagem filtrada e paginada, com o resumo do conjunto filtrado.
+
+    Os cartões da série resumem o que passou no filtro, não o histórico
+    inteiro: filtrar por um pedido responde "como esse pedido evoluiu?", que é
+    a pergunta que motivou o filtro.
+    """
+    filtros = filtros or {}
+    todas = listar_execucoes(diretorio)
+    filtradas = [linha for linha in todas if _casa(linha, filtros)]
+    por_pagina = _inteiro(filtros.get("por_pagina"), POR_PAGINA_PADRAO, 1, POR_PAGINA_MAXIMO)
+    paginas = max(1, -(-len(filtradas) // por_pagina))
+    pagina = _inteiro(filtros.get("pagina"), 1, 1, paginas)
+    inicio = (pagina - 1) * por_pagina
+    nos = sum(linha["tempo_nos_s"] for linha in filtradas)
+    return {
+        "itens": filtradas[inicio:inicio + por_pagina],
+        "total": len(filtradas),
+        "total_geral": len(todas),
+        "pagina": pagina,
+        "paginas": paginas,
+        "por_pagina": por_pagina,
+        "resumo": {
+            "execucoes": len(filtradas),
+            "deploy": sum(1 for linha in filtradas if linha["desfecho"] == "deploy"),
+            "teto": sum(1 for linha in filtradas if linha["tetos"]),
+            "retrabalho_s": round(sum(linha["retrabalho_s"] for linha in filtradas), 1),
+            "tempo_nos_s": round(nos, 1),
+        },
+        # Os valores que existem no histórico, para os seletores não oferecerem
+        # opção que devolve lista vazia.
+        "opcoes": {
+            "desfechos": sorted({linha["desfecho"] for linha in todas}),
+            "stacks": sorted({linha["stack"] for linha in todas if linha["stack"]}),
+        },
+    }
 
 
 # ---------- servidor ----------
@@ -321,7 +425,9 @@ class _Painel(BaseHTTPRequestHandler):
             return
 
         if rota == "/api/execucoes":
-            self._json(listar_execucoes(self.diretorio))
+            consulta = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+            filtros = {chave: valores[0] for chave, valores in consulta.items() if valores}
+            self._json(consultar_execucoes(self.diretorio, filtros))
             return
 
         if rota.startswith("/api/execucao/"):
