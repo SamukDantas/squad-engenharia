@@ -341,12 +341,14 @@ async function verHistorico() {
   await carregar();
 
   // Atualiza sozinha: uma execução disparada no terminal aparece na lista sem
-  // recarregar a página. A cada 5 s, só com a aba visível; o `timer` é o mesmo
-  // que as outras telas limpam, então sair para o detalhe encerra o ciclo.
+  // recarregar a página. A cada 5 s, SEMPRE: a primeira versão pulava a
+  // atualização com a aba "hidden", e o painel embutido no app reporta
+  // `hidden` mesmo aberto na frente de quem olha — a thread nova só aparecia
+  // no F5. A consulta é local e as linhas vêm do cache do servidor, então
+  // atualizar sem olhar a visibilidade custa quase nada. O `timer` é o mesmo
+  // que as outras telas limpam: sair para o detalhe encerra o ciclo.
   const ciclo = async () => {
-    if (document.visibilityState === "visible") {
-      try { await carregar(); } catch { /* servidor fora do ar: tenta de novo */ }
-    }
+    try { await carregar(); } catch { /* servidor fora do ar: tenta de novo */ }
     if (!location.hash) timer = setTimeout(ciclo, 5000);
   };
   timer = setTimeout(ciclo, 5000);
