@@ -332,3 +332,13 @@ def test_nextjs_ensina_a_receita_de_interacao_que_roda_na_jaula():
                    "IS_REACT_ACT_ENVIRONMENT", "createRoot", '"submit"'):
         assert trecho.replace('\\"', '"') in instrucoes, trecho
     assert "jsdom" in perfis.obter("nextjs").ambiente_testes
+
+
+def test_receita_proibe_import_meta_url_para_ler_arquivo_no_jsdom():
+    """Thread `594ca62f`: o QA seguiu a receita de interação e, no mesmo
+    arquivo jsdom, leu um CSS por `new URL(..., import.meta.url)` — que o
+    jsdom quebra com "The URL must be of scheme file". 1 de 28 testes
+    vermelho por ambiente, e duas rodadas de correção gastas no executor."""
+    instrucoes = perfis.obter("nextjs").instrucoes_qa
+    assert "process.cwd()" in instrucoes
+    assert "NÃO use `new URL(..., import.meta.url)`" in instrucoes
