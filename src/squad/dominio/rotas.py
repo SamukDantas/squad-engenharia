@@ -206,7 +206,7 @@ def pos_revisao(state: Estado) -> Decisao:
 
     Aprovado pela revisão, o próximo juiz é a execução ofensiva, não o gate
     humano direto: testes verdes e revisão limpa não provam que a entrega
-    resiste a ataque.
+    resiste a ataque. A verificação visual já falou antes da revisão.
     """
     if state.get("aprovado"):
         return Decisao(destino="pentest")
@@ -235,7 +235,7 @@ def pos_pentest(state: Estado) -> Decisao:
     não fechou, e publicar às cegas é o pior caminho.
     """
     if state.get("pentest_ok"):
-        return Decisao(destino="visual")
+        return Decisao(destino="aprovacao_humana")
     if state.get("pentest_tentativas", 0) >= MAX_PENTEST:
         return Decisao(
             destino="aprovacao_humana",
@@ -253,21 +253,28 @@ def pos_pentest(state: Estado) -> Decisao:
 
 
 def pos_visual(state: Estado) -> Decisao:
-    """Teto próprio, pela mesma razão do teto do pentest.
+    """A verificação visual vem ANTES da revisão.
 
-    Ao estourar, o gate humano decide com os achados em mãos — contraste
-    insuficiente é defeito real, mas não é motivo para queimar a execução
-    inteira em rodadas de CSS.
+    É o juiz mais barato que ainda não falou: determinístico, sem token, uns
+    40 s. Rodava por último, depois da revisão e do pentest, e a reprova dela
+    chegava com o orçamento de correção esgotado — medido no dashboard
+    Next.js (thread `af83302f`): 3 rodadas, e o `fundo_nao_declarado` foi
+    parar no gate. Antes da revisão, uma reprova visual também poupa uma
+    revisão inteira sobre um CSS que vai mudar.
+
+    Ao estourar o teto próprio, segue para a revisão, como os ambientes:
+    contraste insuficiente é defeito real, mas não invalida o julgamento do
+    revisor, e os achados ficam no estado para o gate humano ver.
     """
     if state.get("visual_ok"):
-        return Decisao(destino="aprovacao_humana")
+        return Decisao(destino="revisao")
     if state.get("visual_tentativas", 0) >= MAX_VISUAL:
         return Decisao(
-            destino="aprovacao_humana",
+            destino="revisao",
             teto=Teto("visual", MAX_VISUAL),
             aviso=(
                 f">>> Visual reprovou {MAX_VISUAL}x: teto de correções atingido, "
-                "levando ao gate humano com os achados."
+                "seguindo para a revisão com os achados no estado."
             ),
         )
     if state["tentativas"] >= MAX_TENTATIVAS:
@@ -284,19 +291,20 @@ def pos_config_ambientes(state: Estado) -> Decisao:
     `ambientes_ok=True` e passa direto — o nó existe sempre no grafo, como o
     pentest e o visual, e é o perfil que decide se ele tem algo a dizer.
 
-    Ao estourar o teto segue para a revisão em vez de ir ao gate: diferente de
-    teste vermelho, uma configuração errada não invalida o julgamento do
-    revisor, e o achado fica no estado para o gate humano ver.
+    Ao estourar o teto segue adiante (visual, depois revisão) em vez de ir ao
+    gate: diferente de teste vermelho, uma configuração errada não invalida o
+    julgamento dos juízes seguintes, e o achado fica no estado para o gate
+    humano ver.
     """
     if state.get("ambientes_ok", True):
-        return Decisao(destino="revisao")
+        return Decisao(destino="visual")
     if state.get("ambientes_tentativas", 0) >= MAX_AMBIENTES:
         return Decisao(
-            destino="revisao",
+            destino="visual",
             teto=Teto("ambientes", MAX_AMBIENTES),
             aviso=(
                 f">>> Ambientes reprovaram {MAX_AMBIENTES}x: teto atingido, "
-                "seguindo para a revisão com os achados no estado."
+                "seguindo com os achados no estado."
             ),
         )
     if state["tentativas"] >= MAX_TENTATIVAS:

@@ -5,6 +5,8 @@ Uso:
   python main.py --thread <id>                           # retomar execução interrompida
   python main.py --thread <id> --a-partir-de escrever_testes
                                                          # thread nova, dali em diante
+  python main.py --thread <id> --a-partir-de escrever_testes --ate executar_testes
+                                                         # e para depois do juiz que interessa
 
 O thread id é impresso no início de cada execução. Com o checkpointer SQLite,
 uma queda no meio (erro 503 do provedor, Ctrl+C, crash) não perde o progresso:
@@ -55,7 +57,7 @@ def _entrada_da_thread(thread_id: str) -> str:
     return "triagem"
 
 
-def _reexecutar(origem: str, no: str) -> tuple[str, dict]:
+def _reexecutar(origem: str, no: str, ate: str | None = None) -> tuple[str, dict]:
     """Cria a thread nova a partir do estado de `origem` antes de `no`.
 
     Devolve o id novo e a entrada do grafo (reexecucao.py).
@@ -90,7 +92,7 @@ def _reexecutar(origem: str, no: str) -> tuple[str, dict]:
     registrar(
         novo, "inicio_execucao",
         pedido=estado.get("pedido", ""), stack=estado.get("stack"), paralelo=False,
-        reexecucao={"thread_origem": origem, "a_partir_de": no},
+        reexecucao={"thread_origem": origem, "a_partir_de": no, **({"ate": ate} if ate else {})},
         **_cota(),
     )
     return novo, entrada
@@ -163,6 +165,13 @@ def main() -> None:
              "indicado e roda dali em diante. A thread de origem não muda.",
     )
     parser.add_argument(
+        "--ate",
+        metavar="NO",
+        help="Com --a-partir-de: para logo depois deste nó, sem pagar os seguintes. "
+             "Ex.: --a-partir-de escrever_testes --ate executar_testes valida uma "
+             "correção do QA sem desenvolvimento, revisão nem visual.",
+    )
+    parser.add_argument(
         "--paralelo",
         action="store_true",
         help="Decompõe o pedido em microsserviços e os constrói em paralelo, "
@@ -177,6 +186,10 @@ def main() -> None:
 
     if args.a_partir_de and not args.thread:
         parser.error("--a-partir-de exige --thread <id da thread de origem>")
+    if args.ate and not args.a_partir_de:
+        parser.error("--ate só vale numa reexecução, com --a-partir-de")
+    if args.ate and args.ate not in reexecucao.NOS_REEXECUTAVEIS:
+        parser.error(f"--ate: use um destes nós: {', '.join(reexecucao.NOS_REEXECUTAVEIS)}")
 
     no_de_entrada = "triagem"
     if args.a_partir_de:
@@ -184,7 +197,7 @@ def main() -> None:
         # partindo de um nó sem LLM, o laço volta ao desenvolvimento no vermelho.
         _exigir_credencial()
         no_de_entrada = args.a_partir_de
-        thread_id, entrada = _reexecutar(args.thread, args.a_partir_de)
+        thread_id, entrada = _reexecutar(args.thread, args.a_partir_de, args.ate)
         paralelo = False
         config = {"configurable": {"thread_id": thread_id}}
     elif args.thread:
@@ -220,7 +233,7 @@ def main() -> None:
         if paralelo:
             print("Modo paralelo: o pedido será decomposto em microsserviços.")
 
-    grafo = construir_maestro() if paralelo else construir_grafo(no_de_entrada)
+    grafo = construir_maestro() if paralelo else construir_grafo(no_de_entrada, args.ate)
     if args.thread and not args.a_partir_de and retomada_chama_llm(grafo.get_state(config).next):
         _exigir_credencial()
 
@@ -231,6 +244,15 @@ def main() -> None:
     try:
         _rodar(grafo, entrada, config)
         estado = grafo.get_state(config)
+        if args.ate and estado.next:
+            # Parada pedida, não gate: o que interessava já rodou. A thread
+            # continua retomável com --thread, sem o --ate, se valer a pena.
+            registrar(thread_id, "fim_execucao", desfecho="parcial",
+                      parado_depois=args.ate, **_cota())
+            print(f"\nReexecução parada depois de '{args.ate}', como pedido.")
+            print(f"Para seguir dali: python main.py --thread {thread_id}")
+            print(resumo(thread_id))
+            return
         if estado.next:  # pausado no gate humano
             print("\nGrafo pausado aguardando aprovação humana.")
             motivo = (estado.values or {}).get("motivo_gate")

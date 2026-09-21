@@ -7,7 +7,7 @@ usando **LangGraph** como orquestrador (estado, checkpoints, gates humanos) e
 ## Arquitetura
 
 ```
-Triagem → Planejamento → Guard aderência → Desenvolvimento → Testes → pytest → Revisão → Pentest → Visual → Aprovação humana → Deploy
+Triagem → Planejamento → Guard aderência → Desenvolvimento → Testes → pytest → Visual → Revisão → Pentest → Aprovação humana → Deploy
               ↑__↻ spec incoerente (máx. 2)_|   ↑___↻ testes vermelhos (máx. 3) / revisão reprovada (máx. 2) / vuln bloqueante (máx. 2) / contraste reprovado (máx. 2)___↻_|
 ```
 
@@ -123,6 +123,17 @@ A squad cria uma **thread nova** com o estado da origem imediatamente antes
 daquele nó (a última vez que ele foi o próximo passo) e roda dali em diante,
 com workspace e métricas próprios. A thread de origem não muda. No painel, a
 reexecução aparece com a origem embaixo do id (`↳ 35d3bceb @ visual`).
+
+Para parar logo depois do juiz que interessa, sem pagar os nós seguintes:
+
+```bash
+python main.py --thread <id> --a-partir-de escrever_testes --ate executar_testes
+```
+
+Assim, validar uma correção do QA custa a passada do QA, o guard de critérios
+e a suíte, sem desenvolvimento, revisão nem visual. A execução termina com o
+desfecho `parcial` e continua retomável com `--thread <id novo>`. É o caminho
+padrão para validar correção: não reexecute o pedido do zero.
 
 Nós aceitos: `planejamento`, `validacao_spec`, `desenvolvimento`,
 `escrever_testes`, `validacao_testes`, `executar_testes`, `config_ambientes`,
@@ -368,7 +379,8 @@ resposta do app-server, o marco simplesmente sai sem o campo.
 
 Read-only por construção, exceto a exclusão, que só move para a lixeira: o
 escritor único de `metrics/` continua sendo o `metricas.py`. Serve execução viva
-(atualiza sozinho a cada 3s) e histórico antigo pelo mesmo caminho, porque a
+(o detalhe atualiza sozinho a cada 3s, e a tela inicial a cada 5s, então uma
+execução disparada no terminal aparece sem recarregar) e histórico antigo pelo mesmo caminho, porque a
 fonte é o disco e não o processo do grafo. Sobe só em `127.0.0.1` — não tem
 autenticação e expõe o pedido e os vereditos da execução. A exclusão exige o
 cabeçalho `X-Painel`, que outra página aberta no navegador não consegue mandar
