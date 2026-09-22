@@ -75,9 +75,13 @@ def _binario() -> str:
     return binario
 
 
-# O modelo da squad: medido contra o OpenCode com o gateway corporativo no mesmo pedido,
-# 3 a 4x mais rápido e verde no gate (RESILIENCIA.md, item 38).
-MODELO_PADRAO = "gpt-5.6-luna"
+# O modelo da squad. O `gpt-5.6-luna` foi o medido contra o OpenCode com a
+# gateway corporativo (3 a 4x mais rápido e verde no gate, RESILIENCIA.md, item 38) e o
+# de todas as correções dos itens 39 e 40; o `gpt-5.6-sol` só passou a ser
+# aceito quando a conta foi para o plano Plus, em 22/09/2026 — antes, o
+# servidor o recusava com "not supported when using Codex with a ChatGPT
+# account".
+MODELO_PADRAO = "gpt-5.6-sol"
 
 
 def modelo() -> str:
