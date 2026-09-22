@@ -58,6 +58,16 @@ def acumular(uso: dict) -> None:
         contagem["chamadas"] = contagem.get("chamadas", 0) + 1
 
 
+def marcar(campo: str) -> None:
+    """Conta um acontecimento em todas as contagens abertas, sem ser chamada.
+
+    Para o que não é gasto de token mas pertence ao nó, como a troca para o
+    modelo reserva (`codex_cli._rodar_com_reserva`).
+    """
+    for contagem in _abertas.get():
+        contagem[campo] = contagem.get(campo, 0) + 1
+
+
 @contextmanager
 def contar():
     """Abre uma contagem; o dicionário devolvido é preenchido até o fim do bloco."""

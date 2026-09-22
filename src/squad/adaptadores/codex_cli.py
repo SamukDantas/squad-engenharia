@@ -75,21 +75,67 @@ def _binario() -> str:
     return binario
 
 
-# O modelo da squad: medido contra o OpenCode com o gateway corporativo no mesmo pedido,
-# 3 a 4x mais rápido e verde no gate (RESILIENCIA.md, item 38).
-MODELO_PADRAO = "gpt-5.6-luna"
+# O modelo da squad. O `gpt-5.6-luna` foi o medido contra o OpenCode com a
+# gateway corporativo (3 a 4x mais rápido e verde no gate, RESILIENCIA.md, item 38) e o
+# de todas as correções dos itens 39 e 40; o `gpt-5.6-sol` só passou a ser
+# aceito quando a conta foi para o plano Plus, em 22/09/2026 — antes, o
+# servidor o recusava com "not supported when using Codex with a ChatGPT
+# account".
+MODELO_PADRAO = "gpt-5.6-sol"
+# O modelo reserva: entra quando o principal é recusado por indisponibilidade
+# ou limite (`_pede_reserva`). É o Luna, com que as correções dos itens 38 a 40
+# do RESILIENCIA foram medidas. `CODEX_FALLBACK_MODEL=nenhum` desliga.
+MODELO_RESERVA_PADRAO = "gpt-5.6-luna"
+
+# Uma vez recusado, o principal não é tentado de novo neste processo: cada
+# tentativa recusada custa uma ida ao servidor, e um limite de uso não passa em
+# segundos. A próxima execução da squad começa pelo principal outra vez.
+_em_reserva = False
 
 
 def modelo() -> str:
-    """O modelo de todo uso do Codex na squad — executor e agentes.
+    """O modelo em uso agora no Codex — executor e agentes.
 
     Sempre explícito: a squad roda com --ignore-user-config, e sem `--model`
-    quem escolheria seria o padrão do servidor, que muda sem aviso.
+    quem escolheria seria o padrão do servidor, que muda sem aviso. Depois de
+    uma recusa do principal, é o reserva até o fim do processo.
     """
+    if _em_reserva and modelo_reserva():
+        return modelo_reserva()
+    return modelo_principal()
+
+
+def modelo_principal() -> str:
     return (os.getenv("CODEX_RUN_MODEL") or "").strip() or MODELO_PADRAO
 
 
-def _base(diretorio: str, sandbox: str) -> list[str]:
+def modelo_reserva() -> str | None:
+    """O reserva, ou None se desligado ou igual ao principal."""
+    valor = os.getenv("CODEX_FALLBACK_MODEL")
+    reserva = MODELO_RESERVA_PADRAO if valor is None else valor.strip()
+    if not reserva or reserva.lower() == "nenhum" or reserva == modelo_principal():
+        return None
+    return reserva
+
+
+# Recusas que são do modelo ou da conta, e não da tarefa: modelo fora do
+# plano (o "not supported when using Codex with a ChatGPT account" que o
+# gpt-5.6-sol devolvia no plano gratuito), limite de uso da janela, excesso de
+# requisições. Falha de sandbox, de política ou da própria tarefa não entra:
+# trocar de modelo não a resolveria, e esconderia o erro de verdade.
+_RECUSAS_DO_MODELO = (
+    "not supported", "usage limit", "rate limit", "too many requests", "429",
+    "quota", "model_not_found", "does not exist", "unsupported model",
+    "model is not available", "capacity",
+)
+
+
+def _pede_reserva(motivo: str) -> bool:
+    texto = (motivo or "").lower()
+    return any(marca in texto for marca in _RECUSAS_DO_MODELO)
+
+
+def _base(diretorio: str, sandbox: str, modelo_da_chamada: str | None = None) -> list[str]:
     """As flags comuns a toda chamada: escopo por execução e falha explícita.
 
     `sandbox` é `workspace-write` para quem grava a entrega (executor, QA) e
@@ -107,12 +153,34 @@ def _base(diretorio: str, sandbox: str) -> list[str]:
     ]
     if os.name == "nt":
         comando += ["-c", f'windows.sandbox="{_sandbox_windows()}"']
-    comando += ["--model", modelo()]
+    comando += ["--model", modelo_da_chamada or modelo()]
     return comando
 
 
-def _comando(workspace: str, prompt: str = PROMPT) -> list[str]:
-    return _base(workspace, "workspace-write") + [prompt]
+def _comando(workspace: str, prompt: str = PROMPT, modelo_da_chamada: str | None = None) -> list[str]:
+    return _base(workspace, "workspace-write", modelo_da_chamada) + [prompt]
+
+
+def _rodar_com_reserva(montar, timeout: int, rotulo: str, entrada: str | None = None) -> str:
+    """Roda com o modelo em uso e, se ele for recusado, repete com o reserva.
+
+    `montar(modelo)` devolve o comando para aquele modelo. A troca fica
+    registrada nas métricas do nó (`fallbacks`) e no terminal, e vale para o
+    resto do processo.
+    """
+    global _em_reserva
+    atual = modelo()
+    try:
+        return _rodar(montar(atual), timeout, rotulo, entrada)
+    except RuntimeError as e:
+        reserva = modelo_reserva()
+        if _em_reserva or not reserva or not _pede_reserva(str(e)):
+            raise
+        motivo = " ".join(str(e).split())[:160]
+        print(f">>> {atual} recusado em {rotulo} ({motivo}); seguindo com {reserva}.")
+        _em_reserva = True
+        consumo.marcar("fallbacks")
+        return _rodar(montar(reserva), timeout, rotulo, entrada)
 
 
 def _falha_no_stream(saida: str) -> str | None:
@@ -226,7 +294,9 @@ def executar_codex(workspace: str, spec: str, feedback_qa: str, perfil) -> str:
     print(f">>> Desenvolvimento via Codex CLI ({modelo()})...")
     if os.name == "nt":
         print(f"    sandbox: workspace-write ({_sandbox_windows()}) | config e rules da máquina: ignorados")
-    saida = _rodar(_comando(workspace), _timeout(), "desenvolvimento")
+    saida = _rodar_com_reserva(
+        lambda m: _comando(workspace, modelo_da_chamada=m), _timeout(), "desenvolvimento"
+    )
     print(relatavel((_resumo(saida) or saida)[-LIMITE_SAIDA:]))
     return saida
 
@@ -251,8 +321,9 @@ def responder(texto: str, timeout: int, rotulo: str = "chamada de texto") -> str
     (o que ele precisa julgar vem dentro do próprio texto, como já vinha).
     """
     with tempfile.TemporaryDirectory(prefix="squad-codex-") as vazio:
-        saida = _rodar(
-            _base(vazio, "read-only") + [PROMPT_TEXTO], timeout, rotulo, entrada=texto
+        saida = _rodar_com_reserva(
+            lambda m: _base(vazio, "read-only", m) + [PROMPT_TEXTO],
+            timeout, rotulo, entrada=texto,
         )
     resposta = _resumo(saida)
     if not resposta:
@@ -292,7 +363,9 @@ def executar_qa(workspace: str, descricao: str) -> str:
     dir_squad.mkdir(parents=True, exist_ok=True)
     (dir_squad / ARQUIVO_TAREFA_QA).write_text(REGRAS_QA + descricao, encoding="utf-8")
     print(f">>> QA via Codex CLI ({modelo()})...")
-    saida = _rodar(_comando(workspace, PROMPT_QA), _timeout(), "escrita de testes")
+    saida = _rodar_com_reserva(
+        lambda m: _comando(workspace, PROMPT_QA, m), _timeout(), "escrita de testes"
+    )
     print(relatavel((_resumo(saida) or saida)[-LIMITE_SAIDA:]))
     return saida
 

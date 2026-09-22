@@ -173,7 +173,8 @@ sequenceDiagram
    Codex CLI (`codex`, padrão), o gateway gateway corporativo on-premise (`gateway`) e o
    OpenCode Zen (`zen`), como `DEV_EXECUTOR` escolhe o executor — a
    governança do grafo não depende de quem responde. A configuração em uso é
-   **Codex com `gpt-5.6-luna`** nos agentes e no executor: no mesmo pedido
+   **Codex com `gpt-5.6-sol`** nos agentes e no executor, desde que a conta
+   foi para o plano Plus; as medições abaixo são do `gpt-5.6-luna`: no mesmo pedido
    (calculadora de juros em Next.js), a média caiu de 70,8 min com o OpenCode
    e o gateway corporativo, nunca verde no gate, para 21,4 min, com as execuções mais
    recentes verdes sem intervenção — a medição e as ressalvas estão no item 38

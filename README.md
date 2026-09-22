@@ -131,8 +131,9 @@ python main.py --thread <id> --a-partir-de escrever_testes --ate executar_testes
 ```
 
 Assim, validar uma correção do QA custa a passada do QA, o guard de critérios
-e a suíte, sem desenvolvimento, revisão nem visual. A execução termina com o
-desfecho `parcial` e continua retomável com `--thread <id novo>`. É o caminho
+e a suíte, sem desenvolvimento, revisão nem visual. A execução termina como
+`validado` ou `reprovado`, com os motivos, e continua retomável com
+`--thread <id novo>`. É o caminho
 padrão para validar correção: não reexecute o pedido do zero.
 
 Num laço o nó roda mais de uma vez, e por padrão vale a **primeira** passada:
@@ -175,22 +176,27 @@ inclusive leitura, e a run termina com exit 0 sem ter feito nada.
 
 O mesmo `--ignore-user-config` vale para o **modelo**: o `model` do seu
 `config.toml` não chega ao executor. Por isso a squad manda sempre `--model`:
-`CODEX_RUN_MODEL`, ou `gpt-5.6-luna` quando a variável está vazia. Com login
-por conta ChatGPT só valem os modelos liberados para o plano — medido nesta
-máquina em set/2026: `gpt-5.6-terra`, `gpt-5.6-luna` e `gpt-5.5` respondem, e
-qualquer outro nome (inclusive o `gpt-5.6-sol` que a documentação cita) volta
-`400 not supported when using Codex with a ChatGPT account`. O catálogo da sua
-conta está em `~/.codex/models_cache.json`.
+`CODEX_RUN_MODEL`, ou `gpt-5.6-sol` quando a variável está vazia. Com login por conta ChatGPT só valem os modelos liberados para o plano.
+Medido nesta máquina: no plano gratuito, só `gpt-5.6-terra`, `gpt-5.6-luna` e
+`gpt-5.5` respondiam, e qualquer outro nome (inclusive o `gpt-5.6-sol`) voltava
+`400 not supported when using Codex with a ChatGPT account`. No plano Plus
+(remedido em 22/09/2026), o catálogo passou a incluir `gpt-5.6-sol` e
+`gpt-6-astra`, e o Sol responde. O catálogo da sua conta está em
+`~/.codex/models_cache.json`.
 
 > **Esta lista tem prazo e depende do plano — remeça antes de confiar nela.**
 > `gpt-5.5` aposenta do Codex em **14/out/2026** e sai do catálogo nessa data;
-> nada no projeto aponta para ele (o padrão é `gpt-5.6-luna`), então a
-> retirada não quebra a squad, mas a linha acima passa a estar errada. A
-> medição também foi feita antes do plano Plus, que segundo o levantamento em
-> [docs/MODELOS-CODEX.md](docs/MODELOS-CODEX.md) libera `gpt-5.6-sol` e
-> `gpt-6-astra` no Codex — o que contradiz o `400` registrado aqui. Conferir
-> com `cat ~/.codex/models_cache.json`. Esse doc traz também o comparativo dos
-> modelos, as cotas por plano e as demais datas de aposentadoria.
+> nada no projeto aponta para ele, então a retirada não quebra a squad. O
+> comparativo dos modelos, as cotas por plano e as demais datas de
+> aposentadoria estão em [docs/MODELOS-CODEX.md](docs/MODELOS-CODEX.md).
+
+O `gpt-5.6-luna` fica como **reserva** (`CODEX_FALLBACK_MODEL`, padrão
+`gpt-5.6-luna`, e `nenhum` desliga). Quando o Sol é recusado por
+indisponibilidade ou limite de uso (`not supported`, `usage limit`,
+`rate limit`, `429`), a chamada é repetida com o Luna, e o resto do processo
+segue nele. Falha da tarefa, como sandbox ou política, nunca troca de modelo:
+trocar não a resolveria e esconderia o erro. A troca aparece no terminal, no
+resumo ("Modelo reserva usado") e nas métricas do nó (`fallbacks`).
 
 Os agentes (planejamento, QA, revisão, guards) seguem `LLM_PROVEDOR`, que por
 padrão também é o Codex — ver [Provedor de LLM](#provedor-de-llm-codex-gateway-corporativo-ou-opencode-zen).
@@ -547,7 +553,7 @@ endpoint HTTP, sem chave de API e sem Keycloak. Combine com
 ```
 LLM_PROVEDOR=codex
 DEV_EXECUTOR=codex
-CODEX_RUN_MODEL=gpt-5.6-luna
+CODEX_RUN_MODEL=gpt-5.6-sol
 ```
 
 - **Agentes que só respondem texto** (planejamento, revisão, decomposição,

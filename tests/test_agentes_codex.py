@@ -18,7 +18,7 @@ PYTHON = perfis.obter("python")
 @pytest.fixture
 def codex(monkeypatch):
     monkeypatch.setenv("LLM_PROVEDOR", "codex")
-    monkeypatch.setenv("CODEX_RUN_MODEL", "gpt-5.6-luna")
+    monkeypatch.setenv("CODEX_RUN_MODEL", "gpt-5.6-sol")
     monkeypatch.setattr(codex_cli.shutil, "which", lambda _n: "C:/npm/codex")
 
 
@@ -27,7 +27,7 @@ def codex(monkeypatch):
 def test_provedor_codex_da_um_codexllm_com_o_modelo_fixado(codex):
     modelo = llm.squad_llm()
     assert isinstance(modelo, llm.CodexLLM)
-    assert modelo.model == "gpt-5.6-luna"
+    assert modelo.model == "gpt-5.6-sol"
 
 
 def test_chamada_acessoria_leva_teto_curto(codex, monkeypatch):
@@ -83,7 +83,7 @@ def test_texto_vai_por_stdin_em_sandbox_read_only(codex, monkeypatch):
     assert codex_cli.responder("PEDIDO\nLONGO", timeout=10) == "OK"
     cmd = chamado["cmd"]
     assert cmd[cmd.index("--sandbox") + 1] == "read-only"
-    assert cmd[cmd.index("--model") + 1] == "gpt-5.6-luna"
+    assert cmd[cmd.index("--model") + 1] == "gpt-5.6-sol"
     assert cmd[-1] == codex_cli.PROMPT_TEXTO
     assert chamado["input"] == "PEDIDO\nLONGO"
 

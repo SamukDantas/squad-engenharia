@@ -276,6 +276,10 @@ def resumo(thread_id: str) -> str:
             f" ({tokens.get('entrada_cache', 0):,} em cache),"
             f" {tokens.get('saida', 0):,} de saída em {tokens.get('chamadas', 0)} chamadas"
         )
+    if tokens.get("fallbacks"):
+        linhas.append(
+            f"  Modelo reserva usado        : {tokens['fallbacks']}x (o principal foi recusado)"
+        )
     gasto = gasto_da_cota(eventos)
     if gasto:
         linhas.append(

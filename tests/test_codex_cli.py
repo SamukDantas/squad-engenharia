@@ -60,9 +60,9 @@ def test_fora_do_windows_nao_manda_a_flag(binario, monkeypatch):
     assert not any(a.startswith("windows.sandbox") for a in cmd)
 
 
-def test_modelo_padrao_e_o_luna(binario, monkeypatch):
+def test_modelo_padrao_e_o_sol(binario, monkeypatch):
     cmd = _cmd(monkeypatch)
-    assert cmd[cmd.index("--model") + 1] == "gpt-5.6-luna"
+    assert cmd[cmd.index("--model") + 1] == "gpt-5.6-sol"
     cmd = _cmd(monkeypatch, CODEX_RUN_MODEL="gpt-5.6-sol")
     assert cmd[cmd.index("--model") + 1] == "gpt-5.6-sol"
 
