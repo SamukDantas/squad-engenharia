@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from .adaptadores.metricas_json import gasto_da_cota
+from .adaptadores.metricas_json import gasto_da_cota, veredito_da_validacao
 
 DIR_PADRAO = Path("metrics")
 PORTA_PADRAO = 4949
@@ -223,6 +223,10 @@ def detalhar(diretorio: Path, thread_id: str) -> dict | None:
     )
     inicios = [m for m in marcos if m["evento"] == "inicio_execucao"]
     desfecho = _desfecho(marcos, barras)
+    # Reexecuções gravadas antes do veredito da validação terminavam como
+    # "parcial", que não diz se passaram. O veredito sai dos mesmos eventos.
+    if desfecho == "parcial":
+        desfecho = "validado" if veredito_da_validacao(eventos)["ok"] else "reprovado"
 
     return {
         "thread_id": thread_id,

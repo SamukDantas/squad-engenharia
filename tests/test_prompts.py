@@ -20,7 +20,7 @@ RAIZ = Path(__file__).resolve().parents[1]
 # um serviço rodam em crews que também recebem `_do_perfil()`.
 POR_TAREFA = {
     "pedido", "spec", "arquivos", "feedback_qa", "codigo", "saida_testes",
-    "revisao_anterior",
+    "revisao_anterior", "criterios",
 }
 
 # As crews do maestro são a exceção: rodam antes de existir stack de ramo, e

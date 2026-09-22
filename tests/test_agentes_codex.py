@@ -136,7 +136,7 @@ def test_qa_pelo_codex_desfaz_o_que_mexeu_no_codigo(tmp_path, monkeypatch):
 
     monkeypatch.setattr(workflow, "executar_qa_codex", qa_que_trapaceia)
     entradas = {**workflow._do_perfil(PYTHON), "spec": "SPEC", "arquivos": "app.py",
-                "feedback_qa": "Nenhum — primeira rodada."}
+                "feedback_qa": "Nenhum — primeira rodada.", "criterios": "1. item"}
     workflow._qa_pelo_codex({"workspace": str(ws), "thread_id": "t"}, PYTHON, entradas)
 
     assert (ws / "app.py").read_text(encoding="utf-8") == "ORIGINAL"

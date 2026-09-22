@@ -27,7 +27,9 @@ truststore.inject_into_ssl()
 load_dotenv(override=True)
 
 from src.squad.adaptadores import codex_cli, perfis  # noqa: E402
-from src.squad.adaptadores.metricas_json import eventos, registrar, resumo  # noqa: E402
+from src.squad.adaptadores.metricas_json import (  # noqa: E402
+    eventos, registrar, resumo, veredito_da_validacao,
+)
 from src.squad.dominio.rotas import retomada_chama_llm  # noqa: E402
 from src.squad.graph import reexecucao  # noqa: E402
 from src.squad.graph.maestro import construir_maestro  # noqa: E402
@@ -261,9 +263,22 @@ def main() -> None:
         if args.ate and estado.next:
             # Parada pedida, não gate: o que interessava já rodou. A thread
             # continua retomável com --thread, sem o --ate, se valer a pena.
-            registrar(thread_id, "fim_execucao", desfecho="parcial",
-                      parado_depois=args.ate, **_cota())
+            # O desfecho é o veredito da validação, não "parcial": parar onde se
+            # pediu não diz se o que rodou passou (metricas_json).
+            veredito = veredito_da_validacao(eventos(thread_id))
+            registrar(
+                thread_id, "fim_execucao",
+                desfecho="validado" if veredito["ok"] else "reprovado",
+                de_primeira=veredito["de_primeira"],
+                motivos=veredito["motivos"],
+                parado_depois=args.ate, **_cota(),
+            )
             print(f"\nReexecução parada depois de '{args.ate}', como pedido.")
+            if veredito["ok"]:
+                print("VALIDADO" + (" de primeira." if veredito["de_primeira"] else
+                      f", com reprova no caminho: {', '.join(veredito['reprovas_no_caminho'])}."))
+            else:
+                print("REPROVADO: " + "; ".join(veredito["motivos"]))
             print(f"Para seguir dali: python main.py --thread {thread_id}")
             print(resumo(thread_id))
             return
