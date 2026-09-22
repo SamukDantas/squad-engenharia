@@ -26,7 +26,16 @@ _ROTA = re.compile(
 # Nome de campo entre crases. Exige camelCase ou duas palavras coladas para não
 # transformar cada `id` e cada `int` do texto num requisito — termo curto e
 # genérico aparece em qualquer código e o achado seria sempre verde à toa.
-_CAMPO = re.compile(r"`([a-z][a-z0-9]*(?:[A-Z][a-zA-Z0-9]*)+)`")
+_CAMEL = r"[a-z][a-z0-9]*(?:[A-Z][a-zA-Z0-9]*)+"
+# Campo DEFINIDO: `nome: tipo`, o formato que o prompt do contrato pede para
+# cada campo de requisição e de resposta. Só ele vira símbolo cobrado.
+_CAMPO_DEFINIDO = re.compile(rf"`({_CAMEL})\s*:\s*[^`]+`")
+# Qualquer camelCase entre crases: a regra antiga, que só vale como recuo para
+# contrato que não define campo nenhum no formato acima. Medido na execução
+# paralela `eaad3461`: ela pegou `camelCase` ("JSON com campos em `camelCase`")
+# e `sessionId` ("`allocationId` — igual ao `sessionId`"), palavras da prosa,
+# e reteve o event-service por dois campos que nenhum serviço devia ter.
+_CAMPO = re.compile(rf"`({_CAMEL})`")
 
 # Cabeçalho markdown: abre uma seção nova, e é onde os serviços da seção são
 # nomeados com mais frequência.
@@ -95,6 +104,7 @@ def simbolos_do_contrato(texto: str, servicos: list[str]) -> list[Simbolo]:
     """
     envolvidos_por: dict[tuple[str, str], set[str]] = {}
     provedor_por: dict[tuple[str, str], str] = {}
+    campos = _CAMPO_DEFINIDO if _CAMPO_DEFINIDO.search(texto or "") else _CAMPO
     for secao in _secoes(texto or ""):
         baixa = secao.lower()
         envolvidos = tuple(s for s in servicos if s.lower() in baixa)
@@ -107,7 +117,7 @@ def simbolos_do_contrato(texto: str, servicos: list[str]) -> list[Simbolo]:
             provedor = next((s for s in servicos if s.lower() == nome), None)
 
         termos = [(rota.rstrip("/") or "/", "rota") for _, rota in _ROTA.findall(secao)]
-        termos += [(campo, "campo") for campo in _CAMPO.findall(secao)]
+        termos += [(campo, "campo") for campo in campos.findall(secao)]
         for chave in termos:
             envolvidos_por.setdefault(chave, set()).update(envolvidos)
             if provedor:
