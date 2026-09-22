@@ -179,9 +179,16 @@ O mesmo `--ignore-user-config` vale para o **modelo**: o `model` do seu
 `CODEX_RUN_MODEL`, ou `gpt-5.6-sol` quando a variável está vazia. Com login por conta ChatGPT só valem os modelos liberados para o plano.
 Medido nesta máquina: no plano gratuito, só `gpt-5.6-terra`, `gpt-5.6-luna` e
 `gpt-5.5` respondiam, e qualquer outro nome (inclusive o `gpt-5.6-sol`) voltava
-`400 not supported when using Codex with a ChatGPT account`. No plano Plus, o
-catálogo passou a incluir `gpt-5.6-sol` e `gpt-6-astra`. O catálogo da sua
-conta está em `~/.codex/models_cache.json`.
+`400 not supported when using Codex with a ChatGPT account`. No plano Plus
+(remedido em 22/09/2026), o catálogo passou a incluir `gpt-5.6-sol` e
+`gpt-6-astra`, e o Sol responde. O catálogo da sua conta está em
+`~/.codex/models_cache.json`.
+
+> **Esta lista tem prazo e depende do plano — remeça antes de confiar nela.**
+> `gpt-5.5` aposenta do Codex em **14/out/2026** e sai do catálogo nessa data;
+> nada no projeto aponta para ele, então a retirada não quebra a squad. O
+> comparativo dos modelos, as cotas por plano e as demais datas de
+> aposentadoria estão em [docs/MODELOS-CODEX.md](docs/MODELOS-CODEX.md).
 
 O `gpt-5.6-luna` fica como **reserva** (`CODEX_FALLBACK_MODEL`, padrão
 `gpt-5.6-luna`, e `nenhum` desliga). Quando o Sol é recusado por
@@ -491,6 +498,10 @@ aparece é `Repository not found` — `gh auth switch --user <conta>` resolve.
 - [docs/DESENVOLVIMENTO-REAL.md](docs/DESENVOLVIMENTO-REAL.md) — roadmap de
   evolução de simulação para desenvolvimento real (workspace, QA que executa
   testes, deploy real) e os padrões de arquitetura que o projeto usa.
+- [docs/MODELOS-CODEX.md](docs/MODELOS-CODEX.md) — comparativo dos modelos do
+  seletor do Codex (Astra, Sol, Terra, Luna, 5.5): especificações, preços,
+  benchmarks, velocidade, cotas do plano Plus e o prazo de aposentadoria do
+  GPT-5.5.
 
 ## Decisões de projeto
 
