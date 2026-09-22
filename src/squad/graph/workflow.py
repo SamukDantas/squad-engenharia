@@ -596,6 +596,8 @@ def no_planejamento(state: EstadoProjeto, config: RunnableConfig) -> EstadoProje
     return {
         "spec": resultado.raw,
         "spec_tentativas": state.get("spec_tentativas", 0) + 1,
+        # Spec nova, lista nova: a lista de critérios sai dos requisitos.
+        "criterios_verificacao": "",
     }
 
 
@@ -882,8 +884,35 @@ def _qa_pelo_codex(state: EstadoProjeto, perfil, entradas: dict) -> None:
                   restaurados=alterados, removidos=criados)
 
 
+def _lista_de_criterios(state: EstadoProjeto, config: RunnableConfig, perfil) -> str:
+    """O que o guard de critérios vai cobrar, escrito por ele antes do QA.
+
+    Uma chamada por spec: fica no estado e vale para todas as passadas do QA
+    e do guard até a spec mudar (dominio/spec.py). Se a chamada falhar, a
+    squad segue sem lista — o guard volta a julgar pelos requisitos, como
+    antes, e a execução não morre por um contrato que é otimização.
+    """
+    if state.get("criterios_verificacao"):
+        return state["criterios_verificacao"]
+    requisitos = spec_da_entrega.requisitos(state["spec"])[:6000]
+    try:
+        with medir(_tid(state, config), "criterios") as m:
+            lista = str(com_retry("lista de critérios", lambda: squad_llm().call(
+                spec_da_entrega.pedido_da_lista_de_criterios(
+                    requisitos, perfil.ambiente_testes
+                )
+            ))).strip()
+            m.update(chars_contexto=len(requisitos), itens=lista.count("\n") + 1)
+    except Exception as e:  # noqa: BLE001 — otimização não derruba a execução
+        print(f">>> Lista de critérios indisponível ({type(e).__name__}); o guard julga pelos requisitos.")
+        return ""
+    print(f">>> Lista de critérios do verificador (o QA a recebe como obrigatória):\n{lista}")
+    return lista
+
+
 def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoProjeto:
     perfil = _perfil(state)
+    criterios = _lista_de_criterios(state, config, perfil)
     arquivos_antes = "\n".join(state.get("arquivos", []))
     with medir(_tid(state, config), "escrever_testes") as m:
         m.update(chars_contexto=(
@@ -896,6 +925,7 @@ def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
             "spec": state["spec"],
             "arquivos": arquivos_antes or "(workspace vazio)",
             "feedback_qa": _feedback_para_qa(state, perfil),
+            "criterios": criterios or "(sem lista: cubra os critérios de aceite dos requisitos)",
         }
         if provedor() == "codex":
             _qa_pelo_codex(state, perfil, entradas)
@@ -910,6 +940,7 @@ def no_escrever_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         "arquivos": arquivos,
         "codigo": _dump_codigo(state["workspace"], arquivos, perfil),
         "testes_tentativas": state.get("testes_tentativas", 0) + 1,
+        "criterios_verificacao": criterios,
     }
 
 
@@ -958,6 +989,7 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
             "Responda SIM ou NAO sozinho na primeira linha. Se NAO, liste nas "
             "linhas seguintes, em até 5 itens curtos, os comportamentos "
             "exigidos que a suíte não verifica."
+            f"{spec_da_entrega.julgamento_pela_lista(state.get('criterios_verificacao', ''))}"
             f"{spec_da_entrega.reavaliacao_do_guard(state.get('lacunas_criterios', ''))}"
             f"\n\nRequisitos da especificação:\n{requisitos}"
             f"\n\nTestes:\n{testes}"

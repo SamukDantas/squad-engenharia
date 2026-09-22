@@ -107,7 +107,12 @@ escrever_testes:
     existem. Não use dependências além de {libs_permitidas} e do próprio
     runner de testes.
     A suíte precisa passar pelo verificador de critérios de primeira: cada
-    passada extra custa uma rodada inteira. Antes de terminar, percorra CADA
+    passada extra custa uma rodada inteira. O verificador já escreveu, antes
+    de você, a lista exata do que ele vai cobrar. Ela é OBRIGATÓRIA: cada
+    item precisa de um teste que o verifique com asserção sobre o resultado,
+    e o manifesto termina com uma linha por item (item → teste). É contra
+    esta lista, e só contra ela, que a suíte vai ser julgada:
+    {criterios} Antes de terminar, percorra CADA
     critério de aceite e cada requisito funcional da seção "## Requisitos"
     da spec e confirme que um
     teste o verifica com asserção sobre o valor real, no nível em que ele é
