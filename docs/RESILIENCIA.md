@@ -16,8 +16,8 @@ parser do veredito contrariava a lição que ele implementava (24). O padrão é
 próprio método — cada volta só apareceu porque a anterior foi executada e
 observada, não argumentada. Os itens 35–37 vieram das execuções em
 setembro/2026 com o gateway corporativo, o 38 compara esse provedor com o
-Codex CLI no mesmo pedido, e o 39 é o que faltava para esse pedido sair numa
-rodada só.
+Codex CLI no mesmo pedido, o 39 é o que faltava para esse pedido sair numa
+rodada só, e o 40 é o guard de critérios aprovando a suíte de primeira.
 
 ---
 
@@ -1429,6 +1429,59 @@ transforma cada erro do juiz em retrabalho do réu, e o réu, proibido de
 contestar, obedece. Os dois sinais de que o juiz errou são baratos de ler:
 a mesma asserção sobrevivendo a uma correção, e o texto certo na tela
 sendo lido errado pelo teste.
+
+---
+
+## 40. Dois juízes lendo o mesmo requisito de jeitos diferentes
+
+**Sintoma:** o guard de critérios dava NAO no primeiro veredito quase
+sempre. Nas 27 execuções registradas, o padrão mudou com o provedor:
+
+| Período | Quem julgava | 1º veredito SIM | 1º veredito NAO |
+|---|---|---|---|
+| 06–07/09 | Zen (deepseek) | 10 de 10 | 0 |
+| 19–22/09 | gateway corporativo e Codex (Luna) | 5 de 17 | 12 de 17 |
+| as 7 últimas | Codex (Luna) | 0 | **7 de 7** |
+
+Cada NAO custava uma passada inteira do QA, de 150 a 270 mil tokens. E, a
+cada reavaliação, o guard achava lacunas novas: na `eb149520`, a primeira
+reprova pediu "tabelas" e "data de fechamento"; o QA cobriu, e a segunda
+pediu "funil vazio".
+
+**Causa raiz:** dois fatos se somavam. O guard ficou mais rigoroso com a troca
+de modelo: o prompt diz "verificador rigoroso", e o Luna o leva ao pé da
+letra, enquanto o deepseek aprovava até suíte fraca (itens 33 e 36). E o QA
+e o guard liam os mesmos requisitos de jeitos diferentes. O QA escolhia o que
+testar; o guard tratava cada item como verificação obrigatória, inclusive
+requisito universal ("todos os indicadores", 4 das 7 reprovas) e formato de
+dados ("oportunidade fechada tem data de fechamento", 3 das 7). A diferença
+entre as duas leituras só aparecia na reprova.
+
+**Solução:** em três passos, cada um medido em reexecução parcial da
+`3842268c`:
+
+- **Veredito da validação:** a reexecução com `--ate` passou a terminar
+  como `validado`/`reprovado`, com `de_primeira` como a régua de "100%".
+  Antes era "parcial", e uma validação verde aparecia igual às que falharam.
+- **Guard com memória** (`26f181b4`): na reavaliação, o guard confere as
+  lacunas que ele mesmo cobrou, em vez de procurar outras. Resultado:
+  reprovado → aderente, **validado**, mas não de primeira.
+- **Contrato antes do QA** (`8e8abef6`): antes da primeira passada do QA, o
+  guard lê só os requisitos e escreve a lista exata do que vai cobrar, com
+  requisito universal expandido item a item. O QA a recebe como obrigatória,
+  e o guard julga contra ela e nada fora dela. Resultado: **validado de
+  primeira**, guard SIM no primeiro veredito, 1 ponto de cota e 220 mil
+  tokens, contra 305 a 315 mil das tentativas anteriores.
+
+**Ainda não validado:** é uma execução só, num pedido só. A lista custa uma
+chamada a mais por spec (~15 mil tokens), paga de volta na primeira passada
+extra do QA que ela evita.
+
+**Princípio:** **quem julga escreve o critério antes de quem é julgado
+trabalhar.** Dois agentes lendo o mesmo requisito produzem duas
+interpretações, e a diferença entre elas vira retrabalho do lado errado da
+fila. Escrito antes, o critério vira contrato; escrito só na reprova, vira
+alvo móvel.
 
 ---
 
