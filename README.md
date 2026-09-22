@@ -175,11 +175,22 @@ inclusive leitura, e a run termina com exit 0 sem ter feito nada.
 
 O mesmo `--ignore-user-config` vale para o **modelo**: o `model` do seu
 `config.toml` não chega ao executor. Por isso a squad manda sempre `--model`:
-`CODEX_RUN_MODEL`, ou `gpt-5.6-luna` quando a variável está vazia. Com login por conta ChatGPT só valem os modelos liberados para o plano —
-medido nesta máquina: `gpt-5.6-terra`, `gpt-5.6-luna` e `gpt-5.5` respondem, e
+`CODEX_RUN_MODEL`, ou `gpt-5.6-luna` quando a variável está vazia. Com login
+por conta ChatGPT só valem os modelos liberados para o plano — medido nesta
+máquina em set/2026: `gpt-5.6-terra`, `gpt-5.6-luna` e `gpt-5.5` respondem, e
 qualquer outro nome (inclusive o `gpt-5.6-sol` que a documentação cita) volta
 `400 not supported when using Codex with a ChatGPT account`. O catálogo da sua
 conta está em `~/.codex/models_cache.json`.
+
+> **Esta lista tem prazo e depende do plano — remeça antes de confiar nela.**
+> `gpt-5.5` aposenta do Codex em **14/out/2026** e sai do catálogo nessa data;
+> nada no projeto aponta para ele (o padrão é `gpt-5.6-luna`), então a
+> retirada não quebra a squad, mas a linha acima passa a estar errada. A
+> medição também foi feita antes do plano Plus, que segundo o levantamento em
+> [docs/MODELOS-CODEX.md](docs/MODELOS-CODEX.md) libera `gpt-5.6-sol` e
+> `gpt-6-astra` no Codex — o que contradiz o `400` registrado aqui. Conferir
+> com `cat ~/.codex/models_cache.json`. Esse doc traz também o comparativo dos
+> modelos, as cotas por plano e as demais datas de aposentadoria.
 
 Os agentes (planejamento, QA, revisão, guards) seguem `LLM_PROVEDOR`, que por
 padrão também é o Codex — ver [Provedor de LLM](#provedor-de-llm-codex-gateway-corporativo-ou-opencode-zen).
@@ -481,6 +492,10 @@ aparece é `Repository not found` — `gh auth switch --user <conta>` resolve.
 - [docs/DESENVOLVIMENTO-REAL.md](docs/DESENVOLVIMENTO-REAL.md) — roadmap de
   evolução de simulação para desenvolvimento real (workspace, QA que executa
   testes, deploy real) e os padrões de arquitetura que o projeto usa.
+- [docs/MODELOS-CODEX.md](docs/MODELOS-CODEX.md) — comparativo dos modelos do
+  seletor do Codex (Astra, Sol, Terra, Luna, 5.5): especificações, preços,
+  benchmarks, velocidade, cotas do plano Plus e o prazo de aposentadoria do
+  GPT-5.5.
 
 ## Decisões de projeto
 
