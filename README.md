@@ -183,6 +183,14 @@ Medido nesta máquina: no plano gratuito, só `gpt-5.6-terra`, `gpt-5.6-luna` e
 catálogo passou a incluir `gpt-5.6-sol` e `gpt-6-astra`. O catálogo da sua
 conta está em `~/.codex/models_cache.json`.
 
+O `gpt-5.6-luna` fica como **reserva** (`CODEX_FALLBACK_MODEL`, padrão
+`gpt-5.6-luna`, e `nenhum` desliga). Quando o Sol é recusado por
+indisponibilidade ou limite de uso (`not supported`, `usage limit`,
+`rate limit`, `429`), a chamada é repetida com o Luna, e o resto do processo
+segue nele. Falha da tarefa, como sandbox ou política, nunca troca de modelo:
+trocar não a resolveria e esconderia o erro. A troca aparece no terminal, no
+resumo ("Modelo reserva usado") e nas métricas do nó (`fallbacks`).
+
 Os agentes (planejamento, QA, revisão, guards) seguem `LLM_PROVEDOR`, que por
 padrão também é o Codex — ver [Provedor de LLM](#provedor-de-llm-codex-gateway-corporativo-ou-opencode-zen).
 
