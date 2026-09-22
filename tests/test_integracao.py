@@ -221,3 +221,50 @@ def test_sem_provedor_ainda_pega_o_que_ninguem_implementou():
 def test_o_provedor_e_lido_do_contrato():
     for s in simbolos():
         assert s.provedor == "room-service", s
+
+
+# ---------- só campo definido é cobrado (execução paralela eaad3461) ----------
+
+CONTRATO_TIPADO = """# Contrato HTTP entre serviços
+
+## Convenções
+
+- JSON com campos em `camelCase`.
+- `event-service` gera `eventId` e `sessionId` antes das alocações.
+
+## Alocar sala
+
+**Chama:** `event-service`
+**Responde:** `room-service`
+**Método e rota:** `POST /rooms/{roomId}/allocations`
+
+- `allocationId: string(UUID)` — igual ao `sessionId`; chave de idempotência.
+- `totalSeats: integer`
+"""
+
+
+def test_palavra_da_prosa_nao_vira_campo():
+    """`camelCase` e `sessionId` só aparecem explicando algo; o event-service
+    ficou retido por eles, com o contrato cumprido."""
+    campos = {s.termo for s in integracao.simbolos_do_contrato(
+        CONTRATO_TIPADO, ["event-service", "room-service"]) if s.tipo == "campo"}
+    assert campos == {"allocationId", "totalSeats"}
+
+
+def test_campo_definido_continua_cobrado():
+    simbolos = integracao.simbolos_do_contrato(
+        CONTRATO_TIPADO, ["event-service", "room-service"])
+    achados = integracao.conferir(simbolos, {
+        "event-service": "allocationId rooms allocations",
+        "room-service": "rooms allocations allocationId",  # nenhum tem totalSeats
+    })
+    assert [a.termo for a in achados] == ["totalSeats"]
+
+
+def test_contrato_sem_campo_tipado_usa_a_regra_antiga():
+    """Contrato no formato antigo, com o campo solto entre crases, continua
+    tendo os campos cobrados."""
+    antigo = "## Sala\nroom-service responde `totalSeats` a event-service.\n"
+    campos = {s.termo for s in integracao.simbolos_do_contrato(
+        antigo, ["event-service", "room-service"])}
+    assert campos == {"totalSeats"}
