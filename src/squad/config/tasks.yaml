@@ -119,7 +119,11 @@ escrever_testes:
     módulo, quando a spec o exige também na interface, conta como faltando.
     Critério geral vale para CADA função ou indicador a que se aplica: se a
     spec diz que a entrada vazia devolve zeros, é um teste de entrada vazia
-    por função, não um só para a primeira que vier à mão.
+    por função, não um só para a primeira que vier à mão. Quando um requisito
+    disser "todos", "todas", "cada" ou "qualquer", escreva no manifesto a
+    lista dos itens a que ele se refere (por exemplo, as quatro funções de
+    indicador, pelo nome) e um teste por item. Esquecer um item dessa lista
+    foi o motivo de reprova mais repetido do verificador.
     Termine o manifesto com uma linha por critério: critério → teste que o
     cobre.
     A seção "## Decisões de implementação" é sugestão do arquiteto, não

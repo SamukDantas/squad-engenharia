@@ -101,3 +101,12 @@ def test_guard_recebe_as_lacunas_e_as_guarda():
 def test_rodada_de_desenvolvimento_zera_a_memoria_do_guard():
     """Código novo, suíte nova: o guard começa do zero, como o laço de testes."""
     assert '"lacunas_criterios": ""' in inspect.getsource(workflow.no_desenvolvimento)
+
+
+def test_requisito_universal_vira_um_teste_por_item():
+    """`eb149520` e `26f181b4`: "para um funil vazio, todos os indicadores
+    devolvem zeros"; o QA testou três das quatro funções, nas duas vezes."""
+    from src.squad.crews.base import TASKS_CFG
+    descricao = TASKS_CFG["escrever_testes"]["description"]
+    assert '"todos", "todas", "cada" ou "qualquer"' in descricao
+    assert "um teste por item" in descricao
