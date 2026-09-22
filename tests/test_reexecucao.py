@@ -25,8 +25,10 @@ class _Checkpointer:
         return iter(self.tuplas)
 
 
-def test_estado_vem_da_ultima_vez_que_o_no_era_o_proximo():
-    """Num laço o nó roda mais de uma vez; vale a ocorrência mais recente."""
+def test_estado_vem_da_primeira_vez_por_padrao_e_da_ultima_se_pedido():
+    """Num laço o nó roda mais de uma vez. A primeira é o ponto limpo: na
+    validação `dd2d9d0b`, partir da última passada do QA herdou a suíte da
+    primeira, e a regra nova nem foi exercitada."""
     cp = _Checkpointer([
         _tupla("servico:a", 4, {"branch:to:escrever_testes": None, "testes_tentativas": 0,
                                 "pedido": "p"}),
@@ -34,8 +36,10 @@ def test_estado_vem_da_ultima_vez_que_o_no_era_o_proximo():
                                 "pedido": "p"}),
         _tupla("servico:a", 5, {"branch:to:validacao_testes": None, "testes_tentativas": 1}),
     ])
-    estado = reexecucao.estado_antes_do_no(cp, "t", "escrever_testes")
-    assert estado == {"testes_tentativas": 1, "pedido": "p"}
+    primeira = reexecucao.estado_antes_do_no(cp, "t", "escrever_testes")
+    assert primeira == {"testes_tentativas": 0, "pedido": "p"}
+    ultima = reexecucao.estado_antes_do_no(cp, "t", "escrever_testes", "ultima")
+    assert ultima == {"testes_tentativas": 1, "pedido": "p"}
 
 
 def test_canal_interno_nao_vira_estado():

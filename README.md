@@ -120,7 +120,7 @@ python main.py --thread <id> --a-partir-de escrever_testes
 ```
 
 A squad cria uma **thread nova** com o estado da origem imediatamente antes
-daquele nó (a última vez que ele foi o próximo passo) e roda dali em diante,
+daquele nó e roda dali em diante,
 com workspace e métricas próprios. A thread de origem não muda. No painel, a
 reexecução aparece com a origem embaixo do id (`↳ 35d3bceb @ visual`).
 
@@ -134,6 +134,11 @@ Assim, validar uma correção do QA custa a passada do QA, o guard de critérios
 e a suíte, sem desenvolvimento, revisão nem visual. A execução termina com o
 desfecho `parcial` e continua retomável com `--thread <id novo>`. É o caminho
 padrão para validar correção: não reexecute o pedido do zero.
+
+Num laço o nó roda mais de uma vez, e por padrão vale a **primeira** passada:
+é o ponto limpo, antes de qualquer retorno de juiz. Partir da última
+(`--ocorrencia ultima`) herda o que as passadas anteriores deixaram. Numa
+validação do QA, isso significa herdar a suíte que se queria reescrever.
 
 Nós aceitos: `planejamento`, `validacao_spec`, `desenvolvimento`,
 `escrever_testes`, `validacao_testes`, `executar_testes`, `config_ambientes`,
