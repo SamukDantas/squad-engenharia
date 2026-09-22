@@ -17,6 +17,7 @@ class EstadoProjeto(TypedDict, total=False):
     codigo: str          # dump consolidado dos arquivos, lido do disco (p/ revisor)
     testes_aderentes: bool   # guard de critérios: a suíte testa o que a spec exige?
     testes_tentativas: int   # contador do laço de reescrita de testes
+    lacunas_criterios: str   # o que o guard de critérios cobrou na última reprova
     testes_ok: bool      # veredito de execução: exit code do pytest == 0
     cobertura: float     # % de cobertura agregada da entrega
     cobertura_pior: float        # % do módulo menos coberto

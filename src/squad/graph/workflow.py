@@ -314,6 +314,12 @@ def no_executar_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
             cobertura=resultado.cobertura.total,
             cobertura_pior=resultado.cobertura.pior,
             cobertura_pior_arquivo=resultado.cobertura.pior_arquivo,
+            # Os dois pisos, gravados para o veredito de uma validação parcial
+            # não depender de reler o .env de quem rodou.
+            cobertura_ok=(
+                resultado.cobertura.total >= _cobertura_minima()
+                and resultado.cobertura.pior >= _cobertura_minima_modulo()
+            ),
         )
         if not resultado.testes_ok:
             # A saída fica no estado e a rodada seguinte a sobrescreve; sem
@@ -708,6 +714,7 @@ def no_desenvolvimento(state: EstadoProjeto, config: RunnableConfig) -> EstadoPr
         "tentativas": state["tentativas"] + 1,
         # Código novo, suíte nova: o laço de testes recomeça do zero.
         "testes_tentativas": 0,
+        "lacunas_criterios": "",
         **extra,
     }
 
@@ -951,6 +958,7 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
             "Responda SIM ou NAO sozinho na primeira linha. Se NAO, liste nas "
             "linhas seguintes, em até 5 itens curtos, os comportamentos "
             "exigidos que a suíte não verifica."
+            f"{spec_da_entrega.reavaliacao_do_guard(state.get('lacunas_criterios', ''))}"
             f"\n\nRequisitos da especificação:\n{requisitos}"
             f"\n\nTestes:\n{testes}"
         ))
@@ -959,8 +967,12 @@ def no_validacao_testes(state: EstadoProjeto, config: RunnableConfig) -> EstadoP
 
     if not aderentes:
         print(">>> Guard de critérios: testes não cobrem os critérios de aceite.")
-        return {"testes_aderentes": False, "feedback_qa": _feedback_criterios(veredito)}
-    return {"testes_aderentes": True, "feedback_qa": ""}
+        return {
+            "testes_aderentes": False,
+            "feedback_qa": _feedback_criterios(veredito),
+            "lacunas_criterios": justificativa(veredito),
+        }
+    return {"testes_aderentes": True, "feedback_qa": "", "lacunas_criterios": ""}
 
 
 def _feedback_criterios(veredito: object) -> str:

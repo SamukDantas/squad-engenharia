@@ -134,6 +134,55 @@ def gasto_da_cota(eventos: list[dict]) -> dict | None:
     }
 
 
+# Campo que carrega o veredito de cada juiz, e o que ele exige a mais.
+_JUIZES = {
+    "validacao_spec": ("spec_coerente",),
+    "validacao_testes": ("testes_aderentes",),
+    "executar_testes": ("testes_ok", "cobertura_ok"),
+    "revisao": ("aprovado",),
+    "visual": ("visual_ok",),
+    "pentest": ("pentest_ok",),
+}
+
+
+def veredito_da_validacao(eventos: list[dict]) -> dict:
+    """Validada ou reprovada: o veredito de uma reexecução parcial.
+
+    Uma reexecução com `--ate` para antes do gate, e o desfecho "parcial" não
+    dizia se a validação passou — a `eed26930` estava verde e aparecia cinza
+    como as que falharam. Validada exige três coisas: o ÚLTIMO veredito de
+    cada juiz que rodou é positivo (inclusive a cobertura, quando gravada),
+    nenhum teto foi atingido e nenhum nó quebrou. `de_primeira` diz se além
+    disso nenhum juiz reprovou no caminho — é a régua de "100% bem sucedido".
+    """
+    ultimos: dict[str, dict] = {}
+    reprovas: list[str] = []
+    motivos: list[str] = []
+    for evento in eventos:
+        nome = evento.get("evento")
+        if nome == "teto_atingido":
+            motivos.append(f"teto de {evento.get('laco', '?')} atingido")
+        if evento.get("erro") and "duracao_s" in evento:
+            motivos.append(f"{nome} quebrou: {str(evento['erro'])[:120]}")
+        if nome in _JUIZES:
+            ultimos[nome] = evento
+            if any(evento.get(c) is False for c in _JUIZES[nome]):
+                reprovas.append(nome)
+    for nome, evento in ultimos.items():
+        falhos = [c for c in _JUIZES[nome] if evento.get(c) is False]
+        if falhos:
+            motivos.append(f"{nome} terminou reprovado ({', '.join(falhos)})")
+    ok = not motivos and bool(ultimos)
+    if not ultimos:
+        motivos.append("nenhum juiz rodou")
+    return {
+        "ok": ok,
+        "de_primeira": ok and not reprovas,
+        "reprovas_no_caminho": reprovas,
+        "motivos": motivos,
+    }
+
+
 def resumo(thread_id: str) -> str:
     """Bloco legível com os indicadores da execução."""
     eventos = _carregar(thread_id)

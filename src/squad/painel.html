@@ -176,6 +176,8 @@ const seloDesfecho = (d) => {
   const classe = {
     deploy: "ok", erro: "ruim", em_curso: "vivo",
     negado: "neutro", aguardando_gate: "espera",
+    // Reexecução com --ate: o veredito da validação, e não "parcial".
+    validado: "ok", reprovado: "ruim",
   }[d] || "neutro";
   return el("span", { class: `selo ${classe}`, text: d });
 };

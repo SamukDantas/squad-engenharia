@@ -23,3 +23,27 @@ def requisitos(spec: str) -> str:
             fim = titulos[i + 1].start() if i + 1 < len(titulos) else len(texto)
             return texto[titulo.start():fim].strip()
     return texto.strip()
+
+
+def reavaliacao_do_guard(lacunas_anteriores: str) -> str:
+    """O trecho do prompt do guard de critérios numa reavaliação.
+
+    Sem memória, cada avaliação procurava lacunas do zero e achava outras: na
+    validação `eb149520` (dashboard), a primeira reprova pediu "tabelas" e
+    "data de fechamento"; o QA cobriu, e a segunda pediu "funil vazio". O QA
+    perseguia um alvo que se movia até bater o teto. É o mesmo defeito que o
+    revisor teve (RESILIENCIA.md, item 27), com o mesmo remédio: o juiz vê o
+    que ele mesmo cobrou e confere ISSO.
+    """
+    if not (lacunas_anteriores or "").strip():
+        return ""
+    return (
+        "\n\nESTA É UMA REAVALIAÇÃO. Na avaliação anterior você apontou estas "
+        "lacunas, e o QA complementou a suíte para cobri-las:\n"
+        f"{lacunas_anteriores.strip()}\n"
+        "Responda SIM se ESSAS lacunas estão cobertas agora. Não procure "
+        "lacunas novas nem refine o que já tem teste: só aponte algo além da "
+        "lista acima se for um critério de aceite dos requisitos sem NENHUM "
+        "teste. Mudar a exigência a cada avaliação faz a suíte nunca "
+        "convergir."
+    )
