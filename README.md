@@ -481,6 +481,10 @@ aparece é `Repository not found` — `gh auth switch --user <conta>` resolve.
 - [docs/DESENVOLVIMENTO-REAL.md](docs/DESENVOLVIMENTO-REAL.md) — roadmap de
   evolução de simulação para desenvolvimento real (workspace, QA que executa
   testes, deploy real) e os padrões de arquitetura que o projeto usa.
+- [docs/MODELOS-CODEX.md](docs/MODELOS-CODEX.md) — comparativo dos modelos do
+  seletor do Codex (Astra, Sol, Terra, Luna, 5.5): especificações, preços,
+  benchmarks, velocidade, cotas do plano Plus e o prazo de aposentadoria do
+  GPT-5.5.
 
 ## Decisões de projeto
 
