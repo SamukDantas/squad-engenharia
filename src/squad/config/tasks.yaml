@@ -117,6 +117,9 @@ escrever_testes:
     erro de cada entrada inválida, os casos de borda (zero, vazio) e a
     atualização depois que o usuário muda a entrada. Critério citado só no
     módulo, quando a spec o exige também na interface, conta como faltando.
+    Critério geral vale para CADA função ou indicador a que se aplica: se a
+    spec diz que a entrada vazia devolve zeros, é um teste de entrada vazia
+    por função, não um só para a primeira que vier à mão.
     Termine o manifesto com uma linha por critério: critério → teste que o
     cobre.
     A seção "## Decisões de implementação" é sugestão do arquiteto, não

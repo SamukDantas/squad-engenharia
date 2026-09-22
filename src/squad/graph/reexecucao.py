@@ -12,8 +12,12 @@ workspace e métricas próprios. A thread de origem não muda.
 
 De onde vem o estado: os checkpoints do subgrafo do serviço guardam o estado
 antes de cada passo, e o canal `branch:to:<nó>` marca o checkpoint em que
-aquele nó é o próximo. Vale a ocorrência mais recente — num laço, o nó roda
-mais de uma vez.
+aquele nó é o próximo. Num laço o nó roda mais de uma vez, e por padrão vale
+a PRIMEIRA ocorrência: é o ponto limpo, antes de qualquer retorno de juiz.
+Medido na validação `dd2d9d0b`: partindo da última passada do QA da
+`3842268c`, a suíte da primeira passada já existia, o QA só a complementou em
+modo ajuste, e a validação não exercitou a regra que queria validar. A última
+ocorrência continua disponível (`ocorrencia="ultima"`).
 
 O limite, que precisa estar dito: o disco não tem checkpoint. O workspace
 novo é uma cópia do workspace de origem **como ele está agora**, menos os
@@ -51,8 +55,16 @@ def pastas_fora_da_copia(ignorar_no_workspace) -> frozenset[str]:
     return (frozenset(ignorar_no_workspace) - _MANTER_NA_COPIA) | _FORA_DA_COPIA
 
 
-def estado_antes_do_no(checkpointer, thread_id: str, no: str) -> dict | None:
-    """O estado do serviço na última vez em que `no` era o próximo passo."""
+OCORRENCIAS = ("primeira", "ultima")
+
+
+def estado_antes_do_no(checkpointer, thread_id: str, no: str,
+                       ocorrencia: str = "primeira") -> dict | None:
+    """O estado do serviço na primeira (ou última) vez em que `no` era o
+    próximo passo."""
+    if ocorrencia not in OCORRENCIAS:
+        raise ValueError(f"ocorrência inválida: '{ocorrencia}'. Use {' ou '.join(OCORRENCIAS)}.")
+    mais_nova = ocorrencia == "ultima"
     marca = f"branch:to:{no}"
     melhor = None
     for tupla in checkpointer.list({"configurable": {"thread_id": thread_id}}):
@@ -63,7 +75,7 @@ def estado_antes_do_no(checkpointer, thread_id: str, no: str) -> dict | None:
         if marca not in valores:
             continue
         passo = tupla.metadata.get("step", -1)
-        if melhor is None or passo > melhor[0]:
+        if melhor is None or (passo > melhor[0] if mais_nova else passo < melhor[0]):
             melhor = (passo, valores)
     if melhor is None:
         return None

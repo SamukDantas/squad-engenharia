@@ -89,3 +89,10 @@ def test_qa_nao_testa_aparencia():
     assert "(CSS, JSON)" not in receita  # a receita não sugere mais ler CSS
     descricao = TASKS_CFG["escrever_testes"]["description"]
     assert "Não leia" in descricao and "arquivo de estilo" in descricao
+
+
+def test_criterio_geral_vale_para_cada_funcao():
+    """Validação `eb149520`: "funil vazio devolve zeros" valia para os quatro
+    indicadores, o QA testou três, e o guard reprovou pelo quarto."""
+    descricao = TASKS_CFG["escrever_testes"]["description"]
+    assert "Critério geral vale para CADA função" in descricao

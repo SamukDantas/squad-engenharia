@@ -57,7 +57,8 @@ def _entrada_da_thread(thread_id: str) -> str:
     return "triagem"
 
 
-def _reexecutar(origem: str, no: str, ate: str | None = None) -> tuple[str, dict]:
+def _reexecutar(origem: str, no: str, ate: str | None = None,
+                ocorrencia: str = "primeira") -> tuple[str, dict]:
     """Cria a thread nova a partir do estado de `origem` antes de `no`.
 
     Devolve o id novo e a entrada do grafo (reexecucao.py).
@@ -72,7 +73,9 @@ def _reexecutar(origem: str, no: str, ate: str | None = None) -> tuple[str, dict
             "Reexecução a partir de um nó ainda não existe para thread paralela: "
             "cada serviço tem o próprio ramo."
         )
-    estado = reexecucao.estado_antes_do_no(construir_grafo().checkpointer, origem, no)
+    estado = reexecucao.estado_antes_do_no(
+        construir_grafo().checkpointer, origem, no, ocorrencia
+    )
     if not estado:
         raise SystemExit(
             f"A thread {origem} nunca chegou a '{no}': não há estado de onde partir."
@@ -84,7 +87,7 @@ def _reexecutar(origem: str, no: str, ate: str | None = None) -> tuple[str, dict
     entrada, removidos = reexecucao.preparar(
         estado, novo, agora, reexecucao.pastas_fora_da_copia(perfil.ignorar_no_workspace)
     )
-    print(f"Reexecução de {origem} a partir de '{no}'.")
+    print(f"Reexecução de {origem} a partir de '{no}' ({ocorrencia} ocorrência).")
     print(f"Thread id desta execução: {novo}")
     print("(guarde para retomar com: python main.py --thread " + novo + ")")
     if removidos:
@@ -92,7 +95,8 @@ def _reexecutar(origem: str, no: str, ate: str | None = None) -> tuple[str, dict
     registrar(
         novo, "inicio_execucao",
         pedido=estado.get("pedido", ""), stack=estado.get("stack"), paralelo=False,
-        reexecucao={"thread_origem": origem, "a_partir_de": no, **({"ate": ate} if ate else {})},
+        reexecucao={"thread_origem": origem, "a_partir_de": no, "ocorrencia": ocorrencia,
+                    **({"ate": ate} if ate else {})},
         **_cota(),
     )
     return novo, entrada
@@ -172,6 +176,14 @@ def main() -> None:
              "correção do QA sem desenvolvimento, revisão nem visual.",
     )
     parser.add_argument(
+        "--ocorrencia",
+        choices=reexecucao.OCORRENCIAS,
+        default="primeira",
+        help="Com --a-partir-de: de qual passada do nó partir, num laço. "
+             "'primeira' (padrão) é o ponto limpo, antes de qualquer retorno de "
+             "juiz; 'ultima' reproduz a passada mais recente.",
+    )
+    parser.add_argument(
         "--paralelo",
         action="store_true",
         help="Decompõe o pedido em microsserviços e os constrói em paralelo, "
@@ -197,7 +209,9 @@ def main() -> None:
         # partindo de um nó sem LLM, o laço volta ao desenvolvimento no vermelho.
         _exigir_credencial()
         no_de_entrada = args.a_partir_de
-        thread_id, entrada = _reexecutar(args.thread, args.a_partir_de, args.ate)
+        thread_id, entrada = _reexecutar(
+            args.thread, args.a_partir_de, args.ate, args.ocorrencia
+        )
         paralelo = False
         config = {"configurable": {"thread_id": thread_id}}
     elif args.thread:
