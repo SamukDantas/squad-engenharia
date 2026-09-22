@@ -9,12 +9,14 @@
     --fundo: #fbfbfa; --papel: #fff; --borda: #e3e1dc; --texto: #1f1e1c;
     --fraco: #6b6862; --verde: #1a7f37; --vermelho: #b8262f; --cinza: #8c8880;
     --azul: #2b5cb8; --ambar: #b06a00;
+    --laranja: #c2410c; --amarelo: #8a6400;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --fundo: #161513; --papel: #1e1d1a; --borda: #33312c; --texto: #ecebe8;
       --fraco: #9a968e; --verde: #4ac26b; --vermelho: #e5606a; --cinza: #7d7a74;
       --azul: #7aa2f7; --ambar: #d99a2b;
+      --laranja: #fb923c; --amarelo: #facc15;
     }
   }
   * { box-sizing: border-box; }
@@ -100,9 +102,12 @@
   .selo.ok { color: var(--verde); }
   .selo.ruim { color: var(--vermelho); }
   .selo.neutro { color: var(--fraco); }
-  .selo.vivo { color: var(--azul); }
+  /* Em curso: amarelo, trabalho andando. */
+  .selo.vivo { color: var(--amarelo); }
   /* Nem sucesso nem falha: parada esperando uma decisão humana. */
-  .selo.espera { color: var(--ambar); }
+  .selo.espera { color: var(--azul); }
+  /* Validação reprovada: não é erro de execução (vermelho), é veredito. */
+  .selo.alerta { color: var(--laranja); }
 
   .legenda { display: flex; gap: 16px; flex-wrap: wrap; color: var(--fraco); font-size: 12px; margin-top: 8px; }
   .legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; }
@@ -177,7 +182,7 @@ const seloDesfecho = (d) => {
     deploy: "ok", erro: "ruim", em_curso: "vivo",
     negado: "neutro", aguardando_gate: "espera",
     // Reexecução com --ate: o veredito da validação, e não "parcial".
-    validado: "ok", reprovado: "ruim",
+    validado: "ok", reprovado: "alerta",
   }[d] || "neutro";
   return el("span", { class: `selo ${classe}`, text: d });
 };
